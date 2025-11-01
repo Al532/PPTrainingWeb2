@@ -34,10 +34,23 @@ const els = {
   timbreLabel: document.querySelector("#timbreLabel"),
   toast: document.querySelector("#toast"),
   test: document.querySelector("#test"),
+  joke: document.querySelector("#joke"),
 };
 
 // Supprimer "tester le son" si présent
 if (els.test) els.test.remove();
+
+const JOKES = [
+  "Pourquoi le musicien est allé en prison ? Parce qu'il a pris des notes !",
+  "Quelle est la note préférée des fantômes ? Le si bémol (BOO-mol) !",
+  "Pourquoi la guitare avait l'air fatiguée ? Parce qu'elle avait trop tiré sur ses cordes !",
+];
+
+function displayJoke() {
+  if (!els.joke || !JOKES.length) return;
+  const randomIndex = Math.floor(Math.random() * JOKES.length);
+  els.joke.textContent = JOKES[randomIndex];
+}
 
 // --- Barre de niveau (±) ---
 const topBar = document.createElement("div");
@@ -260,6 +273,7 @@ levelInc.addEventListener("click", () => setLevel(level + 1));
 btnOUT.addEventListener("click", () => onAnswer({type:"out"}));
 
 // Init
+displayJoke();
 buildGrid();
 setLevel(1);
 setStatus("Prêt");
