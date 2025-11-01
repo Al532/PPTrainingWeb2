@@ -1,22 +1,30 @@
-// ===== Perfect Pitch Training — app.js (36 samples, C4..B6, feedback uniformisé) =====
+// ===== Perfect Pitch Training — app.js (36 samples, flats display, feedback uniformisé) =====
 
-const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const NOTE_NAMES_DISPLAY = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"]; // flats comme le programme Python
+const NOTE_INDEX = { C:0,"C#":1,D:2,Eb:3,E:4,F:5,"F#":6,G:7,Ab:8,A:9,Bb:10,B:11 };
+
+// Normalisation entrée → flats
+function toFlat(name){
+  if (!name) return name;
+  return name.replace("D#","Eb").replace("G#","Ab").replace("A#","Bb");
+}
+
 const CHROMAS_APPEAR_ORDER = ["F","E","F#","Eb","G","D","Ab","C#","A","C","Bb","B"];
 const MAX_LEVEL = 12;
 const ISI_AFTER_RESPONSE_MS = 500;
 
-const TOTAL_SAMPLES = 36;      // 3 octaves * 12
-const OCTAVE_COUNT   = 3;      // C4..B6
+const TOTAL_SAMPLES = 36;      // 3 octaves * 12 (C4..B6)
+const OCTAVE_COUNT   = 3;
 
 let currentBank = "piano";
 let running = false;
 let level = 1;
-let targetPitch = null;        // 0..35 (ex: 0=C4, 12=C5, 24=C6)
+let targetPitch = null;        // 0..35
 let pendingTimer = null;
 
 // Fenêtre d'acceptation des réponses
-let accepting = false;         // true dès que la note est déclenchée
-let answeredThisTrial = false; // une seule saisie par essai
+let accepting = false;
+let answeredThisTrial = false;
 
 const els = {
   grid: document.querySelector("#grid"),
@@ -62,8 +70,8 @@ els.grid.after(bottomBar);
 
 // --- Niveau & set ---
 function nameToIdx(name) {
-  const norm = name.replace("Eb","D#").replace("Bb","A#").replace("Ab","G#");
-  return NOTE_NAMES.indexOf(norm);
+  const flat = toFlat(name);
+  return (flat in NOTE_INDEX) ? NOTE_INDEX[flat] : -1;
 }
 function getLevelNames(L) {
   return CHROMAS_APPEAR_ORDER.slice(0, Math.min(L, MAX_LEVEL));
@@ -90,9 +98,11 @@ function setLevel(newLevel) {
 }
 
 // --- Audio & mapping (36 fichiers par banque) ---
-function chromaOfPitch(pitchIdx){ return ((pitchIdx % 12) + 12) % 12; }
+function chromaOfPitch(pitchIdx){ return ((pitchIdx % 12) + 12) % 12; } // 0..11
+function nameOfChroma(idx){ return NOTE_NAMES_DISPLAY[idx]; }
+
 function samplePath(pitchIdx, bank = currentBank) {
-  const n = (pitchIdx + 1);
+  const n = (pitchIdx + 1); // 1..36
   const code = String(n).padStart(3, "0");
   return bank === "piano"
     ? `assets/Piano1/p1-${code}.wav`
@@ -150,28 +160,28 @@ function toast(msg, t=1000) {
 }
 function setStatus(msg) { els.status.textContent = msg; }
 
-// --- Grille ---
+// --- Grille : ordre C..B mais seulement les notes du set ---
 function buildGrid() {
   els.grid.innerHTML = "";
   const set = new Set(getLevelSet(level));
-  NOTE_NAMES.forEach((name, idx) => {
+  NOTE_NAMES_DISPLAY.forEach((name, idx) => {
     if (!set.has(idx)) return;
     const b = document.createElement("button");
-    b.textContent = name;
+    b.textContent = name;               // affichage flats
     b.addEventListener("click", () => onAnswer({type:"note", idx}));
     els.grid.appendChild(b);
   });
 }
 
-// --- Tirage cible ---
+// --- Tirage cible (0..35) ---
 function wrapPitch(p){ let x = p % TOTAL_SAMPLES; if (x < 0) x += TOTAL_SAMPLES; return x; }
 function pickTargetPitch() {
-  const baseSet = getLevelSet(level);
+  const baseSet = getLevelSet(level);        // chromas autorisées
   const baseChroma = baseSet[Math.floor(Math.random() * baseSet.length)];
-  const octave = Math.floor(Math.random() * OCTAVE_COUNT);
+  const octave = Math.floor(Math.random() * OCTAVE_COUNT); // 0,1,2
   const basePitch = octave * 12 + baseChroma;
   const shift = [-2,-1,0,1,2][Math.floor(Math.random() * 5)];
-  return wrapPitch(basePitch + shift);
+  return wrapPitch(basePitch + shift);       // 0..35
 }
 
 // --- Boucle ---
@@ -184,6 +194,7 @@ function nextTrial() {
   if (!running) return;
   accepting = false;
   answeredThisTrial = false;
+
   targetPitch = pickTargetPitch();
   setStatus(`Niveau ${level} · Écoute…`);
   setTimeout(() => {
@@ -198,10 +209,11 @@ function onAnswer(evt) {
 
   const levelSet = getLevelSet(level);
   const tgtChroma = chromaOfPitch(targetPitch);
+  const tgtName = nameOfChroma(tgtChroma); // flats
 
   if (evt.type === "out") {
     const isOutCorrect = !levelSet.includes(tgtChroma);
-    toast(isOutCorrect ? "✅ Correct" : `❌ ${NOTE_NAMES[tgtChroma]}`, 900);
+    toast(isOutCorrect ? "✅ Correct" : `❌ ${tgtName}`, 900);
     answeredThisTrial = true;
     accepting = false;
     return restartPendingNext();
@@ -212,7 +224,7 @@ function onAnswer(evt) {
     toast("✅ Correct", 600);
   } else {
     if (levelSet.includes(tgtChroma)) {
-      toast(`❌ ${NOTE_NAMES[tgtChroma]}`, 1100);
+      toast(`❌ ${tgtName}`, 1100);
     } else {
       toast("❌ Out", 900);
     }
