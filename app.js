@@ -15,8 +15,10 @@ const ISI_AFTER_RESPONSE_MS = 500;
 
 const TOTAL_SAMPLES = 36;      // 3 octaves * 12 (C4..B6)
 const OCTAVE_COUNT   = 3;
+const CHORD_COUNT    = 24;
 
 let currentBank = "piano";
+let chordsEnabled = true;
 let running = false;
 let level = 1;
 let targetPitch = null;        // 0..35
@@ -29,6 +31,7 @@ let answeredThisTrial = false;
 const els = {
   grid: document.querySelector("#grid"),
   startBtn: document.querySelector("#startStop"),
+  toggleChords: document.querySelector("#toggleChords"),
   toggleTimbre: document.querySelector("#toggleTimbre"),
   status: document.querySelector("#status"),
   timbreLabel: document.querySelector("#timbreLabel"),
@@ -111,6 +114,14 @@ function samplePath(pitchIdx, bank = currentBank) {
 
 let audioCtx = null;
 let decodedCache = new Map();
+async function getDecodedBuffer(key, url) {
+  let buf = decodedCache.get(key);
+  if (!buf) {
+    buf = await fetchDecode(url);
+    decodedCache.set(key, buf);
+  }
+  return buf;
+}
 async function ensureCtx() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === "suspended") await audioCtx.resume();
@@ -132,11 +143,20 @@ async function playBuffer(buffer) {
 async function playPitch(pitchIdx, bank = currentBank) {
   try {
     const key = `${bank}:${pitchIdx}`;
-    let buf = decodedCache.get(key);
-    if (!buf) {
-      buf = await fetchDecode(samplePath(pitchIdx, bank));
-      decodedCache.set(key, buf);
-    }
+    const buf = await getDecodedBuffer(key, samplePath(pitchIdx, bank));
+    await playBuffer(buf);
+  } catch (_) {}
+}
+function chordPath(chordIdx) {
+  const code = String(chordIdx + 1).padStart(3, "0");
+  return `assets/Chords/dom-${code}.wav`;
+}
+async function playRandomChord() {
+  if (!chordsEnabled) return;
+  try {
+    const chordIdx = Math.floor(Math.random() * CHORD_COUNT);
+    const key = `chord:${chordIdx}`;
+    const buf = await getDecodedBuffer(key, chordPath(chordIdx));
     await playBuffer(buf);
   } catch (_) {}
 }
@@ -145,6 +165,15 @@ async function preloadBank(bank) {
     const key = `${bank}:${i}`;
     if (!decodedCache.get(key)) {
       try { decodedCache.set(key, await fetchDecode(samplePath(i, bank))); }
+      catch (_) {}
+    }
+  }
+}
+async function preloadChords() {
+  for (let i = 0; i < CHORD_COUNT; i++) {
+    const key = `chord:${i}`;
+    if (!decodedCache.get(key)) {
+      try { decodedCache.set(key, await fetchDecode(chordPath(i))); }
       catch (_) {}
     }
   }
@@ -199,6 +228,7 @@ function nextTrial() {
   setStatus(`Niveau ${level} · Écoute…`);
   setTimeout(() => {
     playPitch(targetPitch);
+    playRandomChord();
     accepting = true;
   }, 40);
 }
@@ -239,11 +269,12 @@ els.startBtn.textContent = "Start";
 els.startBtn.addEventListener("click", async () => {
   await ensureCtx();
   preloadBank(currentBank);
-  if (!running) {
-    running = true;
-    toast("Go !");
-    nextTrial();
-  }
+  if (chordsEnabled) preloadChords();
+  const wasRunning = running;
+  running = true;
+  clearTimeout(pendingTimer);
+  toast(wasRunning ? "Nouvelle note" : "Go !");
+  nextTrial();
 });
 
 els.toggleTimbre.addEventListener("click", async () => {
@@ -253,6 +284,15 @@ els.toggleTimbre.addEventListener("click", async () => {
   els.timbreLabel.textContent = label;
   await ensureCtx();
   preloadBank(currentBank);
+});
+
+els.toggleChords.addEventListener("click", async () => {
+  chordsEnabled = !chordsEnabled;
+  els.toggleChords.textContent = chordsEnabled ? "Chords ON" : "Chords OFF";
+  if (chordsEnabled) {
+    await ensureCtx();
+    preloadChords();
+  }
 });
 
 levelDec.addEventListener("click", () => setLevel(level - 1));
