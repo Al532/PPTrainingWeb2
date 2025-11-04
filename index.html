@@ -39,8 +39,32 @@
 
   <script type="module" src="app.js"></script>
   <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    if ("serviceWorker" in navigator) {
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (refreshing) return;
+        refreshing = true;
+        window.location.reload();
+      });
+
+      navigator.serviceWorker
+        .register("./sw.js")
+        .then((registration) => {
+          if (registration.waiting) {
+            registration.waiting.postMessage({ type: "SKIP_WAITING" });
+          }
+
+          registration.addEventListener("updatefound", () => {
+            const newWorker = registration.installing;
+            if (!newWorker) return;
+            newWorker.addEventListener("statechange", () => {
+              if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+                newWorker.postMessage({ type: "SKIP_WAITING" });
+              }
+            });
+          });
+        })
+        .catch(() => {});
     }
   </script>
 </body>
