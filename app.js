@@ -43,6 +43,7 @@ let autoMode = false;
 let autoQueueTimer = null;
 let autoNextTimer = null;
 let currentUtterance = null;
+let toastTimer = null;
 
 // Fenêtre d'acceptation des réponses
 let accepting = false;
@@ -51,6 +52,7 @@ let answeredThisTrial = false;
 const els = {
   grid: document.querySelector("#grid"),
   startBtn: document.querySelector("#startStop"),
+  startRow: document.querySelector("#startRow"),
   toggleChords: document.querySelector("#toggleChords"),
   toggleTimbre: document.querySelector("#toggleTimbre"),
   toggleAuto: document.querySelector("#toggleAuto"),
@@ -66,6 +68,11 @@ if (els.test) els.test.remove();
 function updateAutoButton() {
   if (!els.toggleAuto) return;
   els.toggleAuto.textContent = autoMode ? "Auto ON" : "Auto OFF";
+}
+
+function updateStartButton() {
+  if (!els.startBtn) return;
+  els.startBtn.textContent = autoMode ? "Stop" : "Start";
 }
 
 // --- Barre de niveau (±) ---
@@ -85,7 +92,18 @@ levelLabel.style.minWidth = "7ch";
 levelLabel.style.textAlign = "center";
 
 topBar.append(levelDec, levelInc, levelLabel);
-els.grid.before(topBar);
+if (els.startRow) {
+  els.startRow.before(topBar);
+  els.startRow.style.display = "flex";
+  els.startRow.style.gap = "8px";
+  els.startRow.style.alignItems = "center";
+  els.startRow.style.margin = "6px 0";
+} else {
+  els.grid.before(topBar);
+}
+if (els.startBtn && els.startRow && !els.startRow.contains(els.startBtn)) {
+  els.startRow.appendChild(els.startBtn);
+}
 
 // --- Bouton OUT (à gauche) ---
 const bottomBar = document.createElement("div");
@@ -113,13 +131,11 @@ function updateLevelUI() {
   setStatus(`Niveau ${level}`);
 }
 function stopRunForLevelChange() {
-  running = false;
-  accepting = false;
-  answeredThisTrial = false;
-  clearTimeout(pendingTimer);
-  targetPitch = null;
-  cancelAutoFlow();
-  setStatus(`Niveau ${level} sélectionné · appuie sur Start`);
+  const message = autoMode ? `Niveau ${level}` : undefined;
+  stopRunning(message);
+  if (autoMode) {
+    ensureAutoRunning();
+  }
 }
 function setLevel(newLevel) {
   level = Math.max(1, Math.min(MAX_LEVEL, newLevel));
@@ -208,12 +224,93 @@ async function preloadChords() {
 }
 
 // --- UI utils ---
-function toast(msg, t=1000) {
-  els.toast.textContent = msg;
-  if (t>0) {
-    clearTimeout(toast._t);
-    toast._t = setTimeout(()=>{ els.toast.textContent = ""; }, t);
+function clearToast() {
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
   }
+  if (els.toast) {
+    els.toast.textContent = "";
+  }
+}
+
+function toast(msg, t = 1000) {
+  if (autoMode) {
+    clearToast();
+    return;
+  }
+  if (!els.toast) return;
+  clearToast();
+  els.toast.textContent = msg;
+  if (t > 0) {
+    toastTimer = setTimeout(() => {
+      if (els.toast) {
+        els.toast.textContent = "";
+      }
+      toastTimer = null;
+    }, t);
+  }
+}
+
+async function beginRun({ silent = false } = {}) {
+  await ensureCtx();
+  preloadBank(currentBank);
+  if (chordsEnabled) preloadChords();
+  const wasRunning = running;
+  running = true;
+  accepting = false;
+  answeredThisTrial = false;
+  clearTimeout(pendingTimer);
+  pendingTimer = null;
+  if (!silent && !autoMode) {
+    toast(wasRunning ? "Nouvelle note" : "Go !");
+  }
+  nextTrial();
+}
+
+function stopRunning(message) {
+  running = false;
+  accepting = false;
+  answeredThisTrial = false;
+  clearTimeout(pendingTimer);
+  pendingTimer = null;
+  targetPitch = null;
+  cancelAutoFlow();
+  clearToast();
+  const statusMsg = (message !== undefined)
+    ? message
+    : `Niveau ${level} sélectionné · appuie sur Start`;
+  if (statusMsg) setStatus(statusMsg);
+}
+
+async function ensureAutoRunning() {
+  if (!autoMode) return;
+  clearToast();
+  if (!running) {
+    await beginRun({ silent: true });
+    return;
+  }
+  if (targetPitch !== null && !answeredThisTrial) {
+    queueAutoAnswer();
+  }
+}
+
+async function enableAutoMode() {
+  if (autoMode) return;
+  autoMode = true;
+  updateAutoButton();
+  updateStartButton();
+  clearToast();
+  await ensureAutoRunning();
+}
+
+function disableAutoMode({ announce = true } = {}) {
+  if (!autoMode) return;
+  autoMode = false;
+  updateAutoButton();
+  updateStartButton();
+  stopRunning();
+  if (announce) toast("Mode auto OFF", 900);
 }
 function setStatus(msg) { els.status.textContent = msg; }
 
@@ -365,17 +462,16 @@ function onAnswer(evt) {
 }
 
 // --- Événements UI ---
-els.startBtn.textContent = "Start";
-els.startBtn.addEventListener("click", async () => {
-  await ensureCtx();
-  preloadBank(currentBank);
-  if (chordsEnabled) preloadChords();
-  const wasRunning = running;
-  running = true;
-  clearTimeout(pendingTimer);
-  toast(wasRunning ? "Nouvelle note" : "Go !");
-  nextTrial();
-});
+if (els.startBtn) {
+  updateStartButton();
+  els.startBtn.addEventListener("click", async () => {
+    if (autoMode) {
+      disableAutoMode();
+      return;
+    }
+    await beginRun();
+  });
+}
 
 els.toggleTimbre.addEventListener("click", async () => {
   currentBank = (currentBank === "piano") ? "guitar" : "piano";
@@ -388,20 +484,11 @@ els.toggleTimbre.addEventListener("click", async () => {
 
 if (els.toggleAuto) {
   updateAutoButton();
-  els.toggleAuto.addEventListener("click", () => {
-    autoMode = !autoMode;
-    updateAutoButton();
-    if (!autoMode) {
-      cancelAutoFlow();
-      toast("Mode auto OFF", 900);
-      if (running && targetPitch !== null && !answeredThisTrial) {
-        accepting = true;
-      }
+  els.toggleAuto.addEventListener("click", async () => {
+    if (autoMode) {
+      disableAutoMode();
     } else {
-      toast("Mode auto ON", 900);
-      if (running && targetPitch !== null && !answeredThisTrial) {
-        queueAutoAnswer();
-      }
+      await enableAutoMode();
     }
   });
 }
