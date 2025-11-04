@@ -305,7 +305,7 @@ function queueAutoAnswer() {
 
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
-  }, 1000);
+  }, 1700);
 }
 
 function restartPendingNext(delayMs = ISI_AFTER_RESPONSE_MS) {
