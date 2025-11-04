@@ -59,11 +59,7 @@ const els = {
   status: document.querySelector("#status"),
   timbreLabel: document.querySelector("#timbreLabel"),
   toast: document.querySelector("#toast"),
-  test: document.querySelector("#test"),
 };
-
-// Supprimer "tester le son" si présent
-if (els.test) els.test.remove();
 
 function updateAutoButton() {
   if (!els.toggleAuto) return;
