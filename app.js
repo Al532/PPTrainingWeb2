@@ -382,6 +382,7 @@ function queueAutoAnswer() {
   const tgtChroma = chromaOfPitch(targetPitch);
   const isOut = !levelSet.includes(tgtChroma);
   const displayLabel = isOut ? AUTO_OUT_DISPLAY : NOTE_NAMES_DISPLAY[tgtChroma];
+  const nextDelay = isOut ? 2000 : 500;
 
   toast(`🔊 Auto : ${displayLabel}`, 1200);
   accepting = false;
@@ -393,7 +394,7 @@ function queueAutoAnswer() {
       autoNextTimer = setTimeout(() => {
         if (!running || !autoMode) return;
         nextTrial();
-      }, 500);
+      }, nextDelay);
       return;
     }
 
@@ -412,7 +413,7 @@ function queueAutoAnswer() {
       autoNextTimer = setTimeout(() => {
         if (!running || !autoMode) return;
         nextTrial();
-      }, 500);
+      }, nextDelay);
       return;
     }
 
@@ -427,7 +428,7 @@ function queueAutoAnswer() {
       autoNextTimer = setTimeout(() => {
         if (!running || !autoMode) return;
         nextTrial();
-      }, 500);
+      }, nextDelay);
     };
 
     utterance.onend = cleanup;
