@@ -397,8 +397,25 @@ function queueAutoAnswer() {
       return;
     }
 
-    const utterance = new SpeechSynthesisUtterance(isOut ? AUTO_OUT_SPOKEN : NOTE_NAMES_SPOKEN_FR[tgtChroma]);
-    utterance.lang = isOut ? "en-US" : "fr-FR";
+    let utterance = null;
+    if (isOut) {
+      // Feedback audio désactivé pour OUT.
+      // const outUtterance = new SpeechSynthesisUtterance(AUTO_OUT_SPOKEN);
+      // outUtterance.lang = "en-US";
+      // utterance = outUtterance;
+    } else {
+      utterance = new SpeechSynthesisUtterance(NOTE_NAMES_SPOKEN_FR[tgtChroma]);
+      utterance.lang = "fr-FR";
+    }
+
+    if (!utterance) {
+      autoNextTimer = setTimeout(() => {
+        if (!running || !autoMode) return;
+        nextTrial();
+      }, 500);
+      return;
+    }
+
     currentUtterance = utterance;
 
     const cleanup = () => {
