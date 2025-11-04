@@ -2,6 +2,22 @@
 
 const NOTE_NAMES_DISPLAY = ["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"]; // flats comme le programme Python
 const NOTE_INDEX = { C:0,"C#":1,D:2,Eb:3,E:4,F:5,"F#":6,G:7,Ab:8,A:9,Bb:10,B:11 };
+const NOTE_NAMES_SPOKEN_FR = [
+  "do",
+  "do dièse",
+  "ré",
+  "mi bémol",
+  "mi",
+  "fa",
+  "fa dièse",
+  "sol",
+  "la bémol",
+  "la",
+  "si bémol",
+  "si",
+];
+const AUTO_OUT_DISPLAY = "OUT";
+const AUTO_OUT_SPOKEN = "out";
 
 // Normalisation entrée → flats
 function toFlat(name){
@@ -23,6 +39,10 @@ let running = false;
 let level = 1;
 let targetPitch = null;        // 0..35
 let pendingTimer = null;
+let autoMode = false;
+let autoQueueTimer = null;
+let autoNextTimer = null;
+let currentUtterance = null;
 
 // Fenêtre d'acceptation des réponses
 let accepting = false;
@@ -33,6 +53,7 @@ const els = {
   startBtn: document.querySelector("#startStop"),
   toggleChords: document.querySelector("#toggleChords"),
   toggleTimbre: document.querySelector("#toggleTimbre"),
+  toggleAuto: document.querySelector("#toggleAuto"),
   status: document.querySelector("#status"),
   timbreLabel: document.querySelector("#timbreLabel"),
   toast: document.querySelector("#toast"),
@@ -41,6 +62,11 @@ const els = {
 
 // Supprimer "tester le son" si présent
 if (els.test) els.test.remove();
+
+function updateAutoButton() {
+  if (!els.toggleAuto) return;
+  els.toggleAuto.textContent = autoMode ? "Auto ON" : "Auto OFF";
+}
 
 // --- Barre de niveau (±) ---
 const topBar = document.createElement("div");
@@ -91,6 +117,8 @@ function stopRunForLevelChange() {
   accepting = false;
   answeredThisTrial = false;
   clearTimeout(pendingTimer);
+  targetPitch = null;
+  cancelAutoFlow();
   setStatus(`Niveau ${level} sélectionné · appuie sur Start`);
 }
 function setLevel(newLevel) {
@@ -189,6 +217,25 @@ function toast(msg, t=1000) {
 }
 function setStatus(msg) { els.status.textContent = msg; }
 
+function clearAutoTimers() {
+  clearTimeout(autoQueueTimer);
+  clearTimeout(autoNextTimer);
+  autoQueueTimer = null;
+  autoNextTimer = null;
+}
+
+function cancelAutoFlow() {
+  clearAutoTimers();
+  if (currentUtterance) {
+    currentUtterance.onend = null;
+    currentUtterance.onerror = null;
+    currentUtterance = null;
+  }
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+}
+
 // --- Grille : ordre C..B mais seulement les notes du set ---
 function buildGrid() {
   els.grid.innerHTML = "";
@@ -214,6 +261,53 @@ function pickTargetPitch() {
 }
 
 // --- Boucle ---
+function queueAutoAnswer() {
+  clearAutoTimers();
+  if (!autoMode || !running || targetPitch === null) return;
+
+  const levelSet = getLevelSet(level);
+  const tgtChroma = chromaOfPitch(targetPitch);
+  const isOut = !levelSet.includes(tgtChroma);
+  const displayLabel = isOut ? AUTO_OUT_DISPLAY : NOTE_NAMES_DISPLAY[tgtChroma];
+
+  toast(`🔊 Auto : ${displayLabel}`, 1200);
+  accepting = false;
+
+  autoQueueTimer = setTimeout(() => {
+    if (!running || !autoMode) return;
+
+    if (typeof window === "undefined" || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+      autoNextTimer = setTimeout(() => {
+        if (!running || !autoMode) return;
+        nextTrial();
+      }, 500);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(isOut ? AUTO_OUT_SPOKEN : NOTE_NAMES_SPOKEN_FR[tgtChroma]);
+    utterance.lang = isOut ? "en-US" : "fr-FR";
+    currentUtterance = utterance;
+
+    const cleanup = () => {
+      if (currentUtterance !== utterance) return;
+      currentUtterance.onend = null;
+      currentUtterance.onerror = null;
+      currentUtterance = null;
+      if (!running || !autoMode) return;
+      autoNextTimer = setTimeout(() => {
+        if (!running || !autoMode) return;
+        nextTrial();
+      }, 500);
+    };
+
+    utterance.onend = cleanup;
+    utterance.onerror = cleanup;
+
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  }, 1700);
+}
+
 function restartPendingNext(delayMs = ISI_AFTER_RESPONSE_MS) {
   clearTimeout(pendingTimer);
   if (!running) return;
@@ -223,18 +317,24 @@ function nextTrial() {
   if (!running) return;
   accepting = false;
   answeredThisTrial = false;
+  cancelAutoFlow();
 
   targetPitch = pickTargetPitch();
   setStatus(`Niveau ${level} · Écoute…`);
   setTimeout(() => {
     playPitch(targetPitch);
     playRandomChord();
-    accepting = true;
+    if (autoMode) {
+      queueAutoAnswer();
+    } else {
+      accepting = true;
+    }
   }, 40);
 }
 
 // --- Réponses ---
 function onAnswer(evt) {
+  if (autoMode) return;
   if (!running || !accepting || answeredThisTrial) return;
 
   const levelSet = getLevelSet(level);
@@ -285,6 +385,26 @@ els.toggleTimbre.addEventListener("click", async () => {
   await ensureCtx();
   preloadBank(currentBank);
 });
+
+if (els.toggleAuto) {
+  updateAutoButton();
+  els.toggleAuto.addEventListener("click", () => {
+    autoMode = !autoMode;
+    updateAutoButton();
+    if (!autoMode) {
+      cancelAutoFlow();
+      toast("Mode auto OFF", 900);
+      if (running && targetPitch !== null && !answeredThisTrial) {
+        accepting = true;
+      }
+    } else {
+      toast("Mode auto ON", 900);
+      if (running && targetPitch !== null && !answeredThisTrial) {
+        queueAutoAnswer();
+      }
+    }
+  });
+}
 
 els.toggleChords.addEventListener("click", async () => {
   chordsEnabled = !chordsEnabled;
