@@ -44,7 +44,25 @@ jobs:
             exit 1
           fi
 
+      - name: Determine if author is trusted
+        id: author-trust
+        env:
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+        run: |
+          set -euo pipefail
+          case "${AUTHOR_ASSOCIATION}" in
+            OWNER|MEMBER|COLLABORATOR)
+              echo "Author is trusted (${AUTHOR_ASSOCIATION})."
+              echo "trusted=true" >>"${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "Author is not in the trusted allowlist (${AUTHOR_ASSOCIATION})."
+              echo "trusted=false" >>"${GITHUB_OUTPUT}"
+              ;;
+          esac
+
       - name: Retarget pull request to test
+        if: steps.author-trust.outputs.trusted == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.url }}
@@ -65,6 +83,7 @@ jobs:
           fi
 
       - name: Merge pull request into test
+        if: steps.author-trust.outputs.trusted == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
@@ -79,3 +98,8 @@ jobs:
             echo "Merge attempt did not succeed: ${RESPONSE}" >&2
             exit 1
           fi
+
+      - name: Halt for untrusted authors
+        if: steps.author-trust.outputs.trusted != 'true'
+        run: |
+          echo "Skipping retargeting and merging for untrusted contributor."
