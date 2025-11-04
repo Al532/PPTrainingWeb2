@@ -79,3 +79,42 @@ jobs:
             echo "Merge attempt did not succeed: ${RESPONSE}" >&2
             exit 1
           fi
+
+      - name: Delete source branch after merge
+        if: ${{ success() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTIONS_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HEAD_REPO}" ] || [ "${HEAD_REPO}" = "null" ]; then
+            echo "Unable to determine source repository; skipping branch deletion."
+            exit 0
+          fi
+
+          if [ "${HEAD_REPO}" != "${REPO}" ]; then
+            echo "Source branch belongs to a fork; skipping deletion."
+            exit 0
+          fi
+
+          if [ "${HEAD_REF}" = "${DEFAULT_BRANCH}" ] || [ "${HEAD_REF}" = "test" ]; then
+            echo "Source branch is a protected branch (${HEAD_REF}); skipping deletion."
+            exit 0
+          fi
+
+          DELETE_URL="https://api.github.com/repos/${REPO}/git/refs/heads/${HEAD_REF}"
+          RESPONSE=$(curl -sS -X DELETE -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" "${DELETE_URL}" -w '%{http_code}' -o /tmp/delete_response)
+          STATUS="${RESPONSE:(-3)}"
+          BODY=$(cat /tmp/delete_response)
+
+          if [ "${STATUS}" = "204" ]; then
+            echo "Source branch '${HEAD_REF}' deleted successfully."
+          elif [ "${STATUS}" = "404" ]; then
+            echo "Source branch '${HEAD_REF}' not found; it may have already been deleted."
+          else
+            echo "Failed to delete source branch (${STATUS}): ${BODY}" >&2
+            exit 1
+          fi
