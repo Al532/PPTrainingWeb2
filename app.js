@@ -28,6 +28,8 @@ function toFlat(name){
 const CHROMAS_APPEAR_ORDER = ["F","E","F#","Eb","G","D","Ab","C#","A","C","Bb","B"];
 const MAX_LEVEL = 11;
 const ISI_AFTER_RESPONSE_MS = 500;
+const AUTO_DELAY_MIN_MS = 1500;
+const AUTO_DELAY_MAX_MS = 4000;
 
 const TOTAL_SAMPLES = 36;      // 3 octaves * 12 (C4..B6)
 const OCTAVE_COUNT   = 3;
@@ -42,6 +44,7 @@ let pendingTimer = null;
 let autoMode = false;
 let autoQueueTimer = null;
 let autoNextTimer = null;
+let autoDelayMs = 1700;
 let currentUtterance = null;
 let toastTimer = null;
 
@@ -56,10 +59,37 @@ const els = {
   toggleChords: document.querySelector("#toggleChords"),
   toggleTimbre: document.querySelector("#toggleTimbre"),
   toggleAuto: document.querySelector("#toggleAuto"),
+  autoDelaySlider: document.querySelector("#autoDelay"),
+  autoDelayLabel: document.querySelector("#autoDelayLabel"),
   status: document.querySelector("#status"),
   timbreLabel: document.querySelector("#timbreLabel"),
   toast: document.querySelector("#toast"),
 };
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function sliderValueToDelay(value) {
+  const ratio = clamp(Number(value), 0, 100) / 100;
+  return Math.round(
+    AUTO_DELAY_MAX_MS - ratio * (AUTO_DELAY_MAX_MS - AUTO_DELAY_MIN_MS)
+  );
+}
+
+function delayToSliderValue(delay) {
+  const clampedDelay = clamp(delay, AUTO_DELAY_MIN_MS, AUTO_DELAY_MAX_MS);
+  const ratio =
+    (AUTO_DELAY_MAX_MS - clampedDelay) /
+    (AUTO_DELAY_MAX_MS - AUTO_DELAY_MIN_MS);
+  return Math.round(ratio * 100);
+}
+
+function updateAutoDelayLabel() {
+  if (!els.autoDelayLabel) return;
+  const seconds = (autoDelayMs / 1000).toFixed(1).replace(".", ",");
+  els.autoDelayLabel.textContent = `${seconds} s`;
+}
 
 function updateAutoButton() {
   if (!els.toggleAuto) return;
@@ -99,6 +129,22 @@ if (els.startRow) {
 }
 if (els.startBtn && els.startRow && !els.startRow.contains(els.startBtn)) {
   els.startRow.appendChild(els.startBtn);
+}
+
+if (els.autoDelaySlider) {
+  els.autoDelaySlider.value = `${delayToSliderValue(autoDelayMs)}`;
+  updateAutoDelayLabel();
+  els.autoDelaySlider.addEventListener("input", (event) => {
+    const newDelay = sliderValueToDelay(event.target.value);
+    if (newDelay === autoDelayMs) return;
+    autoDelayMs = newDelay;
+    updateAutoDelayLabel();
+    if (autoMode && running && targetPitch !== null && !answeredThisTrial) {
+      queueAutoAnswer();
+    }
+  });
+} else {
+  updateAutoDelayLabel();
 }
 
 // --- Bouton OUT (à gauche) ---
@@ -435,7 +481,7 @@ function queueAutoAnswer() {
 
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
-  }, 1700);
+  }, autoDelayMs);
 }
 
 function restartPendingNext(delayMs = ISI_AFTER_RESPONSE_MS) {

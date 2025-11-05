@@ -15,6 +15,7 @@
     .bar { display:flex; gap:8px; align-items:center; }
     .pill { padding: 6px 10px; border-radius: 999px; background: #0003; }
     #toast { min-height: 1.5em; opacity:.9 }
+    #autoSpeedRow input[type="range"] { flex:1; accent-color:#66f; }
   </style>
 </head>
 <body>
@@ -28,6 +29,12 @@
     <button id="toggleChords">Chords ON</button>
     <button id="toggleTimbre">Timbre : Piano</button>
     <button id="toggleAuto">Auto OFF</button>
+  </div>
+
+  <div class="bar" id="autoSpeedRow">
+    <span class="pill">Vitesse auto</span>
+    <input type="range" id="autoDelay" min="0" max="100" value="0" title="← 4 s · 1,5 s →" />
+    <span class="pill" id="autoDelayLabel"></span>
   </div>
 
   <div class="bar" id="startRow">
