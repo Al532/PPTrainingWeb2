@@ -48,6 +48,7 @@ const AUTO_STATES = {
   OFF: "off",
   ON: "on",
   LEARN: "learn",
+  ACTIVE_LEARN: "active_learn",
 };
 let autoState = AUTO_STATES.OFF;
 let autoQueueTimer = null;
@@ -55,6 +56,10 @@ let autoNextTimer = null;
 let autoDelayMs = 1700;
 let currentUtterance = null;
 let toastTimer = null;
+let activeLearnTrials = 0;
+
+const ACTIVE_LEARN_FADE_TRIALS = 50;
+const ACTIVE_LEARN_MAX_ATTENUATION_DB = 60;
 
 // Fenêtre d'acceptation des réponses
 let accepting = false;
@@ -66,7 +71,9 @@ const els = {
   startRow: document.querySelector("#startRow"),
   toggleChords: document.querySelector("#toggleChords"),
   toggleTimbre: document.querySelector("#toggleTimbre"),
-  toggleAuto: document.querySelector("#toggleAuto"),
+  specialTraining: document.querySelector("#specialTraining"),
+  learnMode: document.querySelector("#learnMode"),
+  activeLearnMode: document.querySelector("#activeLearnMode"),
   autoDelaySlider: document.querySelector("#autoDelay"),
   autoDelayLabel: document.querySelector("#autoDelayLabel"),
   status: document.querySelector("#status"),
@@ -107,15 +114,45 @@ function isLearnMode() {
   return autoState === AUTO_STATES.LEARN;
 }
 
-function updateAutoButton() {
-  if (!els.toggleAuto) return;
-  const label =
-    autoState === AUTO_STATES.OFF
-      ? "Auto OFF"
-      : autoState === AUTO_STATES.LEARN
-      ? "Auto Learn"
-      : "Auto ON";
-  els.toggleAuto.textContent = label;
+function isActiveLearnMode() {
+  return autoState === AUTO_STATES.ACTIVE_LEARN;
+}
+
+function isAnyLearnMode() {
+  return isLearnMode() || isActiveLearnMode();
+}
+
+function updateModeButtons() {
+  if (els.specialTraining) {
+    els.specialTraining.classList.toggle(
+      "mode-active",
+      autoState === AUTO_STATES.ON
+    );
+    els.specialTraining.setAttribute(
+      "aria-pressed",
+      autoState === AUTO_STATES.ON ? "true" : "false"
+    );
+  }
+  if (els.learnMode) {
+    els.learnMode.classList.toggle(
+      "mode-active",
+      autoState === AUTO_STATES.LEARN
+    );
+    els.learnMode.setAttribute(
+      "aria-pressed",
+      autoState === AUTO_STATES.LEARN ? "true" : "false"
+    );
+  }
+  if (els.activeLearnMode) {
+    els.activeLearnMode.classList.toggle(
+      "mode-active",
+      autoState === AUTO_STATES.ACTIVE_LEARN
+    );
+    els.activeLearnMode.setAttribute(
+      "aria-pressed",
+      autoState === AUTO_STATES.ACTIVE_LEARN ? "true" : "false"
+    );
+  }
 }
 
 function updateStartButton() {
@@ -258,26 +295,56 @@ async function fetchDecode(url) {
   const buf = await res.arrayBuffer();
   return new Promise((resolve, reject) => ctx.decodeAudioData(buf, resolve, reject));
 }
-async function playBuffer(buffer) {
+async function playBuffer(buffer, gainValue = 1) {
+  if (gainValue <= 0) return;
   const ctx = await ensureCtx();
   const src = ctx.createBufferSource();
   src.buffer = buffer;
-  src.connect(ctx.destination);
+  if (gainValue !== 1) {
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = gainValue;
+    src.connect(gainNode);
+    gainNode.connect(ctx.destination);
+  } else {
+    src.connect(ctx.destination);
+  }
   src.start();
 }
 async function playPitch(pitchIdx, bank = currentBank) {
   try {
-    const tasks = [
-      getDecodedBuffer(`${bank}:${pitchIdx}`, samplePath(pitchIdx, bank)),
-    ];
-    if (isLearnMode() && pitchIdx < VOICE_SAMPLE_COUNT) {
-      tasks.push(
-        getDecodedBuffer(`voice:${pitchIdx}`, voiceSamplePath(pitchIdx))
-      );
+    const instrumentPromise = getDecodedBuffer(
+      `${bank}:${pitchIdx}`,
+      samplePath(pitchIdx, bank)
+    );
+    const needsVoice = isAnyLearnMode() && pitchIdx < VOICE_SAMPLE_COUNT;
+    const voicePromise = needsVoice
+      ? getDecodedBuffer(`voice:${pitchIdx}`, voiceSamplePath(pitchIdx))
+      : null;
+
+    const instrumentBuffer = await instrumentPromise;
+    const voiceBuffer = voicePromise ? await voicePromise : null;
+
+    playBuffer(instrumentBuffer);
+    if (voiceBuffer) {
+      const gain = isActiveLearnMode()
+        ? getActiveLearnVoiceGain()
+        : 1;
+      if (gain > 0) playBuffer(voiceBuffer, gain);
     }
-    const buffers = await Promise.all(tasks);
-    await Promise.all(buffers.map((buf) => playBuffer(buf)));
   } catch (_) {}
+}
+
+function getActiveLearnVoiceGain() {
+  if (!isActiveLearnMode()) return 1;
+  if (ACTIVE_LEARN_FADE_TRIALS <= 1) return 0;
+  const ratio = clamp(
+    (activeLearnTrials - 1) / (ACTIVE_LEARN_FADE_TRIALS - 1),
+    0,
+    1
+  );
+  if (ratio >= 1) return 0;
+  const attenuationDb = ACTIVE_LEARN_MAX_ATTENUATION_DB * ratio;
+  return Math.pow(10, -attenuationDb / 20);
 }
 function chordPath(chordIdx) {
   const code = String(chordIdx + 1).padStart(3, "0");
@@ -333,7 +400,7 @@ function clearToast() {
 }
 
 function toast(msg, t = 1000) {
-  if (isAutoActive()) {
+  if (isAutoActive() && !isActiveLearnMode()) {
     clearToast();
     return;
   }
@@ -354,7 +421,7 @@ async function beginRun({ silent = false } = {}) {
   await ensureCtx();
   preloadBank(currentBank);
   if (chordsEnabled) preloadChords();
-  if (isLearnMode()) preloadVoices();
+  if (isAnyLearnMode()) preloadVoices();
   const wasRunning = running;
   running = true;
   accepting = false;
@@ -389,7 +456,7 @@ async function ensureAutoRunning() {
     await beginRun({ silent: true });
     return;
   }
-  if (targetPitch !== null && !answeredThisTrial) {
+  if (targetPitch !== null && !answeredThisTrial && !isActiveLearnMode()) {
     queueAutoAnswer();
   }
 }
@@ -405,18 +472,21 @@ async function enableAutoMode(newState) {
   }
   autoState = newState;
   cancelAutoFlow();
-  updateAutoButton();
+  if (isActiveLearnMode()) {
+    activeLearnTrials = 0;
+  }
+  updateModeButtons();
   updateStartButton();
   clearToast();
   if (running) {
-    if (isLearnMode()) preloadVoices();
+    if (isAnyLearnMode()) preloadVoices();
     answeredThisTrial = false;
     accepting = false;
     targetPitch = null;
     nextTrial();
     return;
   }
-  updateAutoButton();
+  updateModeButtons();
   updateStartButton();
   await ensureAutoRunning();
 }
@@ -424,7 +494,7 @@ async function enableAutoMode(newState) {
 function disableAutoMode({ announce = true } = {}) {
   if (!isAutoActive()) return;
   autoState = AUTO_STATES.OFF;
-  updateAutoButton();
+  updateModeButtons();
   updateStartButton();
   stopRunning();
   if (announce) toast("Mode auto OFF", 900);
@@ -468,7 +538,7 @@ function wrapPitch(p){ let x = p % TOTAL_SAMPLES; if (x < 0) x += TOTAL_SAMPLES;
 function pickTargetPitch() {
   const levelSet = getLevelSet(level);        // chromas autorisées
 
-  if (isLearnMode()) {
+  if (isAnyLearnMode()) {
     const chroma = levelSet[Math.floor(Math.random() * levelSet.length)];
     const octave = Math.floor(Math.random() * LEARN_OCTAVE_COUNT); // 0,1
     return octave * 12 + chroma;              // 0..23
@@ -498,6 +568,7 @@ function pickTargetPitch() {
 function queueAutoAnswer() {
   clearAutoTimers();
   if (!isAutoActive() || !running || targetPitch === null) return;
+  if (isActiveLearnMode()) return;
 
   const levelSet = getLevelSet(level);
   const tgtChroma = chromaOfPitch(targetPitch);
@@ -578,12 +649,18 @@ function nextTrial() {
   answeredThisTrial = false;
   cancelAutoFlow();
 
+  if (isActiveLearnMode()) {
+    activeLearnTrials += 1;
+  }
+
   targetPitch = pickTargetPitch();
   setStatus(`Niveau ${level} · Écoute…`);
   setTimeout(() => {
     playPitch(targetPitch);
     playRandomChord();
-    if (isAutoActive()) {
+    if (isActiveLearnMode()) {
+      accepting = true;
+    } else if (isAutoActive()) {
       queueAutoAnswer();
     } else {
       accepting = true;
@@ -593,7 +670,7 @@ function nextTrial() {
 
 // --- Réponses ---
 function onAnswer(evt) {
-  if (isAutoActive()) return;
+  if (isAutoActive() && !isActiveLearnMode()) return;
   if (!running || !accepting || answeredThisTrial) return;
 
   const levelSet = getLevelSet(level);
@@ -644,19 +721,6 @@ els.toggleTimbre.addEventListener("click", async () => {
   preloadBank(currentBank);
 });
 
-if (els.toggleAuto) {
-  updateAutoButton();
-  els.toggleAuto.addEventListener("click", async () => {
-    if (autoState === AUTO_STATES.OFF) {
-      await enableAutoMode(AUTO_STATES.ON);
-    } else if (autoState === AUTO_STATES.ON) {
-      await enableAutoMode(AUTO_STATES.LEARN);
-    } else {
-      disableAutoMode();
-    }
-  });
-}
-
 els.toggleChords.addEventListener("click", async () => {
   chordsEnabled = !chordsEnabled;
   els.toggleChords.textContent = chordsEnabled ? "Chords ON" : "Chords OFF";
@@ -665,6 +729,38 @@ els.toggleChords.addEventListener("click", async () => {
     preloadChords();
   }
 });
+
+updateModeButtons();
+
+if (els.specialTraining) {
+  els.specialTraining.addEventListener("click", async () => {
+    if (autoState === AUTO_STATES.ON) {
+      disableAutoMode({ announce: false });
+    } else {
+      await enableAutoMode(AUTO_STATES.ON);
+    }
+  });
+}
+
+if (els.learnMode) {
+  els.learnMode.addEventListener("click", async () => {
+    if (autoState === AUTO_STATES.LEARN) {
+      disableAutoMode({ announce: false });
+    } else {
+      await enableAutoMode(AUTO_STATES.LEARN);
+    }
+  });
+}
+
+if (els.activeLearnMode) {
+  els.activeLearnMode.addEventListener("click", async () => {
+    if (autoState === AUTO_STATES.ACTIVE_LEARN) {
+      disableAutoMode({ announce: false });
+    } else {
+      await enableAutoMode(AUTO_STATES.ACTIVE_LEARN);
+    }
+  });
+}
 
 levelDec.addEventListener("click", () => setLevel(level - 1));
 levelInc.addEventListener("click", () => setLevel(level + 1));

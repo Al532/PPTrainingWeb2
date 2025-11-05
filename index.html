@@ -11,6 +11,7 @@
     body { margin: 0; padding: 16px; display: grid; gap: 12px; }
     header { display: flex; align-items: center; gap: 8px; }
     button { padding: 12px 14px; border-radius: 12px; border: 1px solid #7775; background: #fff1; }
+    button.mode-active { border-color: #55f; background: #55f2; }
     #grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
     .bar { display:flex; gap:8px; align-items:center; }
     .pill { padding: 6px 10px; border-radius: 999px; background: #0003; }
@@ -28,7 +29,6 @@
   <div class="bar">
     <button id="toggleChords">Chords ON</button>
     <button id="toggleTimbre">Timbre : Piano</button>
-    <button id="toggleAuto">Auto OFF</button>
   </div>
 
   <div class="bar" id="autoSpeedRow">
@@ -39,6 +39,12 @@
 
   <div class="bar" id="startRow">
     <button id="startStop">Start</button>
+  </div>
+
+  <div class="bar" id="modeRow">
+    <button id="specialTraining">Spécial training</button>
+    <button id="learnMode">Learn</button>
+    <button id="activeLearnMode">Active learn</button>
   </div>
 
   <div id="grid"></div>
