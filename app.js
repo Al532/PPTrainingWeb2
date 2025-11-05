@@ -33,7 +33,10 @@ const AUTO_DELAY_MAX_MS = 4000;
 
 const TOTAL_SAMPLES = 36;      // 3 octaves * 12 (C4..B6)
 const OCTAVE_COUNT   = 3;
+const LEARN_OCTAVE_COUNT = 2;  // C4..B5
+const LEARN_TOTAL_SAMPLES = LEARN_OCTAVE_COUNT * 12;
 const CHORD_COUNT    = 24;
+const VOICE_SAMPLE_COUNT = LEARN_TOTAL_SAMPLES;
 
 let currentBank = "piano";
 let chordsEnabled = true;
@@ -41,7 +44,12 @@ let running = false;
 let level = 1;
 let targetPitch = null;        // 0..35
 let pendingTimer = null;
-let autoMode = false;
+const AUTO_STATES = {
+  OFF: "off",
+  ON: "on",
+  LEARN: "learn",
+};
+let autoState = AUTO_STATES.OFF;
 let autoQueueTimer = null;
 let autoNextTimer = null;
 let autoDelayMs = 1700;
@@ -91,14 +99,28 @@ function updateAutoDelayLabel() {
   els.autoDelayLabel.textContent = `${seconds} s`;
 }
 
+function isAutoActive() {
+  return autoState !== AUTO_STATES.OFF;
+}
+
+function isLearnMode() {
+  return autoState === AUTO_STATES.LEARN;
+}
+
 function updateAutoButton() {
   if (!els.toggleAuto) return;
-  els.toggleAuto.textContent = autoMode ? "Auto ON" : "Auto OFF";
+  const label =
+    autoState === AUTO_STATES.OFF
+      ? "Auto OFF"
+      : autoState === AUTO_STATES.LEARN
+      ? "Auto Learn"
+      : "Auto ON";
+  els.toggleAuto.textContent = label;
 }
 
 function updateStartButton() {
   if (!els.startBtn) return;
-  els.startBtn.textContent = autoMode ? "Stop" : "Start";
+  els.startBtn.textContent = isAutoActive() ? "Stop" : "Start";
 }
 
 // --- Barre de niveau (±) ---
@@ -139,7 +161,12 @@ if (els.autoDelaySlider) {
     if (newDelay === autoDelayMs) return;
     autoDelayMs = newDelay;
     updateAutoDelayLabel();
-    if (autoMode && running && targetPitch !== null && !answeredThisTrial) {
+    if (
+      isAutoActive() &&
+      running &&
+      targetPitch !== null &&
+      !answeredThisTrial
+    ) {
       queueAutoAnswer();
     }
   });
@@ -179,9 +206,9 @@ function updateLevelUI() {
   }
 }
 function stopRunForLevelChange() {
-  const message = autoMode ? `Niveau ${level}` : undefined;
+  const message = isAutoActive() ? `Niveau ${level}` : undefined;
   stopRunning(message);
-  if (autoMode) {
+  if (isAutoActive()) {
     ensureAutoRunning();
   }
 }
@@ -202,6 +229,12 @@ function samplePath(pitchIdx, bank = currentBank) {
   return bank === "piano"
     ? `assets/Piano1/p1-${code}.wav`
     : `assets/Guitar/g-${code}.wav`;
+}
+
+function voiceSamplePath(pitchIdx) {
+  const n = pitchIdx + 1; // 1..24
+  const code = String(n).padStart(3, "0");
+  return `assets/Voice/v-${code}.wav`;
 }
 
 let audioCtx = null;
@@ -234,9 +267,16 @@ async function playBuffer(buffer) {
 }
 async function playPitch(pitchIdx, bank = currentBank) {
   try {
-    const key = `${bank}:${pitchIdx}`;
-    const buf = await getDecodedBuffer(key, samplePath(pitchIdx, bank));
-    await playBuffer(buf);
+    const tasks = [
+      getDecodedBuffer(`${bank}:${pitchIdx}`, samplePath(pitchIdx, bank)),
+    ];
+    if (isLearnMode() && pitchIdx < VOICE_SAMPLE_COUNT) {
+      tasks.push(
+        getDecodedBuffer(`voice:${pitchIdx}`, voiceSamplePath(pitchIdx))
+      );
+    }
+    const buffers = await Promise.all(tasks);
+    await Promise.all(buffers.map((buf) => playBuffer(buf)));
   } catch (_) {}
 }
 function chordPath(chordIdx) {
@@ -257,6 +297,16 @@ async function preloadBank(bank) {
     const key = `${bank}:${i}`;
     if (!decodedCache.get(key)) {
       try { decodedCache.set(key, await fetchDecode(samplePath(i, bank))); }
+      catch (_) {}
+    }
+  }
+}
+
+async function preloadVoices() {
+  for (let i = 0; i < VOICE_SAMPLE_COUNT; i++) {
+    const key = `voice:${i}`;
+    if (!decodedCache.get(key)) {
+      try { decodedCache.set(key, await fetchDecode(voiceSamplePath(i))); }
       catch (_) {}
     }
   }
@@ -283,7 +333,7 @@ function clearToast() {
 }
 
 function toast(msg, t = 1000) {
-  if (autoMode) {
+  if (isAutoActive()) {
     clearToast();
     return;
   }
@@ -304,13 +354,14 @@ async function beginRun({ silent = false } = {}) {
   await ensureCtx();
   preloadBank(currentBank);
   if (chordsEnabled) preloadChords();
+  if (isLearnMode()) preloadVoices();
   const wasRunning = running;
   running = true;
   accepting = false;
   answeredThisTrial = false;
   clearTimeout(pendingTimer);
   pendingTimer = null;
-  if (!silent && !autoMode) {
+  if (!silent && !isAutoActive()) {
     toast(wasRunning ? "Nouvelle note" : "Go !");
   }
   nextTrial();
@@ -332,7 +383,7 @@ function stopRunning(message) {
 }
 
 async function ensureAutoRunning() {
-  if (!autoMode) return;
+  if (!isAutoActive()) return;
   clearToast();
   if (!running) {
     await beginRun({ silent: true });
@@ -343,18 +394,36 @@ async function ensureAutoRunning() {
   }
 }
 
-async function enableAutoMode() {
-  if (autoMode) return;
-  autoMode = true;
+async function enableAutoMode(newState) {
+  if (newState === AUTO_STATES.OFF) {
+    disableAutoMode({ announce: false });
+    return;
+  }
+  if (autoState === newState) {
+    await ensureAutoRunning();
+    return;
+  }
+  autoState = newState;
+  cancelAutoFlow();
   updateAutoButton();
   updateStartButton();
   clearToast();
+  if (running) {
+    if (isLearnMode()) preloadVoices();
+    answeredThisTrial = false;
+    accepting = false;
+    targetPitch = null;
+    nextTrial();
+    return;
+  }
+  updateAutoButton();
+  updateStartButton();
   await ensureAutoRunning();
 }
 
 function disableAutoMode({ announce = true } = {}) {
-  if (!autoMode) return;
-  autoMode = false;
+  if (!isAutoActive()) return;
+  autoState = AUTO_STATES.OFF;
   updateAutoButton();
   updateStartButton();
   stopRunning();
@@ -399,6 +468,12 @@ function wrapPitch(p){ let x = p % TOTAL_SAMPLES; if (x < 0) x += TOTAL_SAMPLES;
 function pickTargetPitch() {
   const levelSet = getLevelSet(level);        // chromas autorisées
 
+  if (isLearnMode()) {
+    const chroma = levelSet[Math.floor(Math.random() * levelSet.length)];
+    const octave = Math.floor(Math.random() * LEARN_OCTAVE_COUNT); // 0,1
+    return octave * 12 + chroma;              // 0..23
+  }
+
   if (level <= 3) {
     const chromasOut = [];
     for (let i = 0; i < 12; i += 1) {
@@ -422,7 +497,7 @@ function pickTargetPitch() {
 // --- Boucle ---
 function queueAutoAnswer() {
   clearAutoTimers();
-  if (!autoMode || !running || targetPitch === null) return;
+  if (!isAutoActive() || !running || targetPitch === null) return;
 
   const levelSet = getLevelSet(level);
   const tgtChroma = chromaOfPitch(targetPitch);
@@ -433,11 +508,19 @@ function queueAutoAnswer() {
   accepting = false;
 
   autoQueueTimer = setTimeout(() => {
-    if (!running || !autoMode) return;
+    if (!running || !isAutoActive()) return;
+
+    if (isLearnMode()) {
+      autoNextTimer = setTimeout(() => {
+        if (!running || !isAutoActive()) return;
+        nextTrial();
+      }, 500);
+      return;
+    }
 
     if (typeof window === "undefined" || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
       autoNextTimer = setTimeout(() => {
-        if (!running || !autoMode) return;
+        if (!running || !isAutoActive()) return;
         nextTrial();
       }, 500);
       return;
@@ -456,7 +539,7 @@ function queueAutoAnswer() {
 
     if (!utterance) {
       autoNextTimer = setTimeout(() => {
-        if (!running || !autoMode) return;
+        if (!running || !isAutoActive()) return;
         nextTrial();
       }, 500);
       return;
@@ -469,9 +552,9 @@ function queueAutoAnswer() {
       currentUtterance.onend = null;
       currentUtterance.onerror = null;
       currentUtterance = null;
-      if (!running || !autoMode) return;
+      if (!running || !isAutoActive()) return;
       autoNextTimer = setTimeout(() => {
-        if (!running || !autoMode) return;
+        if (!running || !isAutoActive()) return;
         nextTrial();
       }, 500);
     };
@@ -500,7 +583,7 @@ function nextTrial() {
   setTimeout(() => {
     playPitch(targetPitch);
     playRandomChord();
-    if (autoMode) {
+    if (isAutoActive()) {
       queueAutoAnswer();
     } else {
       accepting = true;
@@ -510,7 +593,7 @@ function nextTrial() {
 
 // --- Réponses ---
 function onAnswer(evt) {
-  if (autoMode) return;
+  if (isAutoActive()) return;
   if (!running || !accepting || answeredThisTrial) return;
 
   const levelSet = getLevelSet(level);
@@ -544,7 +627,7 @@ function onAnswer(evt) {
 if (els.startBtn) {
   updateStartButton();
   els.startBtn.addEventListener("click", async () => {
-    if (autoMode) {
+    if (isAutoActive()) {
       disableAutoMode();
       return;
     }
@@ -564,10 +647,12 @@ els.toggleTimbre.addEventListener("click", async () => {
 if (els.toggleAuto) {
   updateAutoButton();
   els.toggleAuto.addEventListener("click", async () => {
-    if (autoMode) {
-      disableAutoMode();
+    if (autoState === AUTO_STATES.OFF) {
+      await enableAutoMode(AUTO_STATES.ON);
+    } else if (autoState === AUTO_STATES.ON) {
+      await enableAutoMode(AUTO_STATES.LEARN);
     } else {
-      await enableAutoMode();
+      disableAutoMode();
     }
   });
 }
