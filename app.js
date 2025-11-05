@@ -28,8 +28,8 @@ function toFlat(name){
 const CHROMAS_APPEAR_ORDER = ["F","E","F#","Eb","G","D","Ab","C#","A","C","Bb","B"];
 const MAX_LEVEL = 11;
 const ISI_AFTER_RESPONSE_MS = 500;
-const AUTO_DELAY_MIN_MS = 1500;
-const AUTO_DELAY_MAX_MS = 4000;
+const AUTO_DELAY_MIN_MS = 100;
+const AUTO_DELAY_MAX_MS = 2500;
 
 const TOTAL_SAMPLES = 36;      // 3 octaves * 12 (C4..B6)
 const OCTAVE_COUNT   = 3;
