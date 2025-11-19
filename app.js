@@ -36,10 +36,14 @@ const OCTAVE_COUNT   = 3;
 const LEARN_OCTAVE_COUNT = 2;  // C4..B5
 const LEARN_TOTAL_SAMPLES = LEARN_OCTAVE_COUNT * 12;
 const CHORD_COUNT    = 24;
+const INTER_CHORD_DELAY_MS = 1300;
 const VOICE_SAMPLE_COUNT = LEARN_TOTAL_SAMPLES;
 
 let currentBank = "piano";
 let chordsEnabled = true;
+let interChordsEnabled = false;
+let interChordIdx = null;
+let interChordUsesRemaining = 0;
 let running = false;
 let level = 1;
 let targetPitch = null;        // 0..35
@@ -65,6 +69,7 @@ const els = {
   startBtn: document.querySelector("#startStop"),
   startRow: document.querySelector("#startRow"),
   toggleChords: document.querySelector("#toggleChords"),
+  toggleInterChords: document.querySelector("#toggleInterChords"),
   toggleTimbre: document.querySelector("#toggleTimbre"),
   toggleAuto: document.querySelector("#toggleAuto"),
   autoDelaySlider: document.querySelector("#autoDelay"),
@@ -76,6 +81,10 @@ const els = {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function waitMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function sliderValueToDelay(value) {
@@ -292,6 +301,34 @@ async function playRandomChord() {
     await playBuffer(buf);
   } catch (_) {}
 }
+
+function resetInterChordCycle() {
+  interChordIdx = null;
+  interChordUsesRemaining = 0;
+}
+
+function pickInterChordIdx() {
+  if (interChordIdx === null || interChordUsesRemaining <= 0) {
+    interChordIdx = Math.floor(Math.random() * CHORD_COUNT);
+    interChordUsesRemaining = 3;
+  }
+  return interChordIdx;
+}
+
+async function playInterChordIfNeeded() {
+  if (!interChordsEnabled || isLearnMode() || !running) return;
+  const chordIdx = pickInterChordIdx();
+  try {
+    const key = `chord:${chordIdx}`;
+    const buf = await getDecodedBuffer(key, chordPath(chordIdx));
+    await playBuffer(buf);
+  } catch (_) {}
+  interChordUsesRemaining = Math.max(0, interChordUsesRemaining - 1);
+  if (interChordUsesRemaining === 0) {
+    interChordIdx = null;
+  }
+  await waitMs(INTER_CHORD_DELAY_MS);
+}
 async function preloadBank(bank) {
   for (let i = 0; i < TOTAL_SAMPLES; i++) {
     const key = `${bank}:${i}`;
@@ -353,10 +390,11 @@ function toast(msg, t = 1000) {
 async function beginRun({ silent = false } = {}) {
   await ensureCtx();
   preloadBank(currentBank);
-  if (chordsEnabled) preloadChords();
+  if (chordsEnabled || interChordsEnabled) preloadChords();
   if (isLearnMode()) preloadVoices();
   const wasRunning = running;
   running = true;
+  resetInterChordCycle();
   accepting = false;
   answeredThisTrial = false;
   clearTimeout(pendingTimer);
@@ -572,7 +610,7 @@ function restartPendingNext(delayMs = ISI_AFTER_RESPONSE_MS) {
   if (!running) return;
   pendingTimer = setTimeout(nextTrial, delayMs);
 }
-function nextTrial() {
+async function nextTrial() {
   if (!running) return;
   accepting = false;
   answeredThisTrial = false;
@@ -580,15 +618,21 @@ function nextTrial() {
 
   targetPitch = pickTargetPitch();
   setStatus(`Niveau ${level} · Écoute…`);
-  setTimeout(() => {
-    playPitch(targetPitch);
-    playRandomChord();
-    if (isAutoActive()) {
-      queueAutoAnswer();
-    } else {
-      accepting = true;
-    }
-  }, 40);
+  await waitMs(40);
+  if (!running) return;
+
+  if (interChordsEnabled && !isLearnMode()) {
+    await playInterChordIfNeeded();
+    if (!running) return;
+  }
+
+  playPitch(targetPitch);
+  playRandomChord();
+  if (isAutoActive()) {
+    queueAutoAnswer();
+  } else {
+    accepting = true;
+  }
 }
 
 // --- Réponses ---
@@ -659,8 +703,23 @@ if (els.toggleAuto) {
 
 els.toggleChords.addEventListener("click", async () => {
   chordsEnabled = !chordsEnabled;
-  els.toggleChords.textContent = chordsEnabled ? "Chords ON" : "Chords OFF";
-  if (chordsEnabled) {
+  els.toggleChords.textContent = chordsEnabled ? "Simult chords ON" : "Simult chords OFF";
+  if (chordsEnabled || interChordsEnabled) {
+    await ensureCtx();
+    preloadChords();
+  }
+});
+
+els.toggleInterChords.addEventListener("click", async () => {
+  interChordsEnabled = !interChordsEnabled;
+  els.toggleInterChords.textContent = interChordsEnabled
+    ? "Inter chords ON"
+    : "Inter chords OFF";
+  if (!interChordsEnabled) {
+    resetInterChordCycle();
+    return;
+  }
+  if (chordsEnabled || interChordsEnabled) {
     await ensureCtx();
     preloadChords();
   }
