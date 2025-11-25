@@ -75,6 +75,7 @@ let currentState = {
   awaitingGuess: false,
 };
 let feedbackResetTimeout = null;
+let currentAudio = null;
 
 function buildNotesByChroma() {
   const buckets = Array.from({ length: 12 }, () => []);
@@ -215,6 +216,9 @@ async function startTrial(attempt = 0) {
 
 function playSample(instrument, midiNote) {
   const audio = new Audio(`assets/${instrument}/${midiNote}.wav`);
+  audio.volume = 1;
+  currentAudio = audio;
+
   audio
     .play()
     .catch(() => {
@@ -222,9 +226,37 @@ function playSample(instrument, midiNote) {
     });
 }
 
+function fadeOutCurrentAudio() {
+  const audio = currentAudio;
+  if (!audio) return;
+
+  const fadeDurationMs = 200;
+  const startVolume = audio.volume;
+  const startTime = performance.now();
+
+  function step(now) {
+    const elapsed = now - startTime;
+    const progress = Math.min(elapsed / fadeDurationMs, 1);
+    audio.volume = Math.max(startVolume * (1 - progress), 0);
+
+    if (progress < 1) {
+      requestAnimationFrame(step);
+    } else {
+      audio.pause();
+      audio.currentTime = 0;
+      if (currentAudio === audio) {
+        currentAudio = null;
+      }
+    }
+  }
+
+  requestAnimationFrame(step);
+}
+
 function handleAnswer(chosenChroma) {
   if (!currentState.awaitingGuess) return;
   currentState.awaitingGuess = false;
+  fadeOutCurrentAudio();
   if (feedbackResetTimeout) {
     clearTimeout(feedbackResetTimeout);
     feedbackResetTimeout = null;
