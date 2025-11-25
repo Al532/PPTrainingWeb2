@@ -61,6 +61,7 @@ const instruments = [
 
 const midiRange = { min: 36, max: 96 };
 const HIGHLIGHT_DURATION = 800;
+const NEXT_TRIAL_DELAY = 300;
 
 const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
@@ -76,6 +77,7 @@ let currentState = {
 };
 let feedbackResetTimeout = null;
 let currentAudio = null;
+let nextTrialTimeout = null;
 
 function buildNotesByChroma() {
   const buckets = Array.from({ length: 12 }, () => []);
@@ -137,6 +139,7 @@ function handleChromaSetChange(event) {
   const selectedSet = chromaSets[Number(event.target.value)];
   if (!selectedSet) return;
   activeChromaSet = selectedSet;
+  cancelNextTrialTimeout();
   createButtons();
   startTrial();
 }
@@ -187,6 +190,8 @@ function pickRandomNote(chromaIndex) {
 
 async function startTrial(attempt = 0) {
   const MAX_ATTEMPTS = 30;
+
+  cancelNextTrialTimeout();
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
@@ -274,7 +279,22 @@ function handleAnswer(chosenChroma) {
   }
 
   scheduleFeedbackReset();
-  startTrial();
+  scheduleNextTrial();
+}
+
+function cancelNextTrialTimeout() {
+  if (nextTrialTimeout) {
+    clearTimeout(nextTrialTimeout);
+    nextTrialTimeout = null;
+  }
+}
+
+function scheduleNextTrial() {
+  cancelNextTrialTimeout();
+  nextTrialTimeout = setTimeout(() => {
+    nextTrialTimeout = null;
+    startTrial();
+  }, NEXT_TRIAL_DELAY);
 }
 
 function setupMidi() {
