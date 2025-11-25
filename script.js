@@ -78,6 +78,7 @@ let currentState = {
 let feedbackResetTimeout = null;
 let currentAudio = null;
 let nextTrialTimeout = null;
+let lastMidiNotePlayed = null;
 
 function buildNotesByChroma() {
   const buckets = Array.from({ length: 12 }, () => []);
@@ -102,6 +103,19 @@ function createButtons() {
   });
 }
 
+function showStartButton() {
+  resetTrialState();
+
+  buttonsContainer.innerHTML = "";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = "start-button";
+  btn.className = "start-button";
+  btn.textContent = "START";
+  btn.addEventListener("click", handleStartClick);
+  buttonsContainer.appendChild(btn);
+}
+
 function getChromaButton(chromaIndex) {
   return buttonsContainer.querySelector(`button[data-index="${chromaIndex}"]`);
 }
@@ -110,6 +124,29 @@ function resetButtonStates() {
   buttonsContainer.querySelectorAll("button.chroma").forEach((btn) => {
     btn.classList.remove("correct", "incorrect");
   });
+}
+
+function resetButtonFocus() {
+  const activeElement = document.activeElement;
+  if (activeElement && typeof activeElement.blur === "function") {
+    activeElement.blur();
+  }
+}
+
+function resetTrialState() {
+  cancelNextTrialTimeout();
+  fadeOutCurrentAudio();
+  if (feedbackResetTimeout) {
+    clearTimeout(feedbackResetTimeout);
+    feedbackResetTimeout = null;
+  }
+  resetButtonStates();
+  currentState = { chromaIndex: null, midiNote: null, awaitingGuess: false };
+}
+
+function handleStartClick() {
+  createButtons();
+  startTrial();
 }
 
 function scheduleFeedbackReset() {
@@ -139,9 +176,7 @@ function handleChromaSetChange(event) {
   const selectedSet = chromaSets[Number(event.target.value)];
   if (!selectedSet) return;
   activeChromaSet = selectedSet;
-  cancelNextTrialTimeout();
-  createButtons();
-  startTrial();
+  showStartButton();
 }
 
 async function checkSampleExists(instrument, midiNote) {
@@ -184,14 +219,17 @@ function pickRandomChroma() {
 
 function pickRandomNote(chromaIndex) {
   const notes = notesByChroma[chromaIndex];
-  const idx = Math.floor(Math.random() * notes.length);
-  return notes[idx];
+  const pool = notes.filter((note) => note !== lastMidiNotePlayed);
+  const source = pool.length ? pool : notes;
+  const idx = Math.floor(Math.random() * source.length);
+  return source[idx];
 }
 
 async function startTrial(attempt = 0) {
   const MAX_ATTEMPTS = 30;
 
   cancelNextTrialTimeout();
+  resetButtonFocus();
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
@@ -216,6 +254,7 @@ async function startTrial(attempt = 0) {
   }
 
   currentState = { chromaIndex, midiNote, awaitingGuess: true };
+  lastMidiNotePlayed = midiNote;
   playSample(instrument, midiNote);
 }
 
@@ -335,9 +374,8 @@ function handleMidiMessage(message) {
 
 function init() {
   populateChromaSetSelect();
-  createButtons();
+  showStartButton();
   setupMidi();
-  startTrial();
 }
 
 document.addEventListener("DOMContentLoaded", init);
