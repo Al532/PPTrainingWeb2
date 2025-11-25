@@ -74,8 +74,7 @@ let currentState = {
   midiNote: null,
   awaitingGuess: false,
 };
-
-let nextTrialTimeout = null;
+let feedbackResetTimeout = null;
 
 function buildNotesByChroma() {
   const buckets = Array.from({ length: 12 }, () => []);
@@ -110,17 +109,15 @@ function resetButtonStates() {
   });
 }
 
-function setButtonsDisabled(disabled) {
-  buttonsContainer
-    .querySelectorAll("button.chroma")
-    .forEach((btn) => (btn.disabled = disabled));
-}
-
-function clearScheduledTrial() {
-  if (nextTrialTimeout) {
-    clearTimeout(nextTrialTimeout);
-    nextTrialTimeout = null;
+function scheduleFeedbackReset() {
+  if (feedbackResetTimeout) {
+    clearTimeout(feedbackResetTimeout);
   }
+
+  feedbackResetTimeout = setTimeout(() => {
+    resetButtonStates();
+    feedbackResetTimeout = null;
+  }, HIGHLIGHT_DURATION);
 }
 
 function populateChromaSetSelect() {
@@ -189,9 +186,6 @@ function pickRandomNote(chromaIndex) {
 
 async function startTrial(attempt = 0) {
   const MAX_ATTEMPTS = 30;
-  clearScheduledTrial();
-  resetButtonStates();
-  setButtonsDisabled(true);
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
@@ -216,7 +210,6 @@ async function startTrial(attempt = 0) {
   }
 
   currentState = { chromaIndex, midiNote, awaitingGuess: true };
-  setButtonsDisabled(false);
   playSample(instrument, midiNote);
 }
 
@@ -232,7 +225,10 @@ function playSample(instrument, midiNote) {
 function handleAnswer(chosenChroma) {
   if (!currentState.awaitingGuess) return;
   currentState.awaitingGuess = false;
-  setButtonsDisabled(true);
+  if (feedbackResetTimeout) {
+    clearTimeout(feedbackResetTimeout);
+    feedbackResetTimeout = null;
+  }
 
   const isCorrect = chosenChroma === currentState.chromaIndex;
   const chosenButton = getChromaButton(chosenChroma);
@@ -245,7 +241,8 @@ function handleAnswer(chosenChroma) {
     correctButton?.classList.add("correct");
   }
 
-  nextTrialTimeout = setTimeout(() => startTrial(), HIGHLIGHT_DURATION);
+  scheduleFeedbackReset();
+  startTrial();
 }
 
 function setupMidi() {
