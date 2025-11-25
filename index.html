@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ear Training - Chromas</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Ear Training MIDI</h1>
+    <p>Écoutez l'échantillon joué, puis identifiez le chroma en cliquant sur un bouton ou en jouant la note correspondante sur votre clavier MIDI.</p>
+  </header>
+
+  <main>
+    <section class="status">
+      <div class="status-row">
+        <div id="midi-status" class="pill muted">MIDI : détection…</div>
+        <div id="trial-status" class="pill">Nouvelle note en cours…</div>
+      </div>
+      <div id="feedback" class="feedback" aria-live="polite"></div>
+    </section>
+
+    <section class="controls" aria-label="Chromas">
+      <div id="chroma-buttons" class="buttons"></div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>

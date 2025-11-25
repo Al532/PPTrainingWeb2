@@ -1,0 +1,136 @@
+:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --accent: #58a6ff;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --error: #f85149;
+  --success: #3fb950;
+  --border: #30363d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+}
+
+header {
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto 24px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 2.1rem;
+}
+
+main {
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.25);
+}
+
+.status-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(88, 166, 255, 0.1);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pill.muted {
+  color: var(--muted);
+  background: rgba(139, 148, 158, 0.1);
+}
+
+.feedback {
+  min-height: 28px;
+  margin-top: 10px;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+.feedback.error {
+  color: var(--error);
+}
+
+.feedback.success {
+  color: var(--success);
+}
+
+.controls {
+  margin-top: 20px;
+}
+
+.buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 12px;
+}
+
+button.chroma {
+  padding: 16px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #1f2937;
+  color: var(--text);
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+button.chroma:hover {
+  background: #22304a;
+  border-color: var(--accent);
+}
+
+button.chroma:active {
+  transform: translateY(1px);
+}
+
+button.chroma:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  body {
+    padding: 12px;
+  }
+
+  h1 {
+    font-size: 1.6rem;
+  }
+
+  button.chroma {
+    font-size: 1rem;
+  }
+}
