@@ -101,6 +101,29 @@ main {
   gap: 12px;
 }
 
+#start-button {
+  padding: 22px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--accent);
+  background: linear-gradient(145deg, rgba(88, 166, 255, 0.2), rgba(88, 166, 255, 0.35));
+  color: var(--text);
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease,
+    border-color 120ms ease;
+}
+
+#start-button:hover {
+  box-shadow: 0 8px 24px rgba(88, 166, 255, 0.25);
+  background: linear-gradient(145deg, rgba(88, 166, 255, 0.25), rgba(88, 166, 255, 0.45));
+}
+
+#start-button:active {
+  transform: translateY(1px);
+}
+
 button.chroma {
   padding: 16px 12px;
   border-radius: 10px;
