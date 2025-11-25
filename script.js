@@ -404,7 +404,13 @@ function handleMidiMessage(message) {
   const isNoteOn = (status & 0xf0) === 0x90 && data2 > 0;
   if (!isNoteOn) return;
   const chromaIndex = data1 % 12;
-  handleAnswer(chromaIndex);
+  const targetButton = getChromaButton(chromaIndex);
+
+  if (targetButton) {
+    targetButton.click();
+  } else {
+    handleAnswer(chromaIndex);
+  }
 }
 
 function init() {
