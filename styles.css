@@ -70,21 +70,6 @@ main {
   background: rgba(139, 148, 158, 0.1);
 }
 
-.feedback {
-  min-height: 28px;
-  margin-top: 10px;
-  font-size: 1.05rem;
-  color: var(--text);
-}
-
-.feedback.error {
-  color: var(--error);
-}
-
-.feedback.success {
-  color: var(--success);
-}
-
 .controls {
   margin-top: 20px;
 }
@@ -125,7 +110,8 @@ button.chroma {
   font-size: 1.1rem;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
+  transition: transform 120ms ease, background 120ms ease, border-color 120ms ease,
+    color 120ms ease;
 }
 
 button.chroma:hover {
@@ -140,6 +126,18 @@ button.chroma:active {
 button.chroma:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+button.chroma.correct {
+  background: rgba(63, 185, 80, 0.15);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+button.chroma.incorrect {
+  background: rgba(248, 81, 73, 0.1);
+  border-color: var(--error);
+  color: var(--error);
 }
 
 @media (max-width: 480px) {
