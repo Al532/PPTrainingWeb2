@@ -352,7 +352,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     : INCORRECT_FEEDBACK_DURATION;
 
   scheduleFeedbackReset(feedbackDuration);
-  scheduleNextTrial();
+  scheduleNextTrial(feedbackDuration);
 }
 
 function cancelNextTrialTimeout() {
@@ -362,12 +362,13 @@ function cancelNextTrialTimeout() {
   }
 }
 
-function scheduleNextTrial() {
+function scheduleNextTrial(feedbackDuration) {
   cancelNextTrialTimeout();
+  const delayUntilNextTrial = (feedbackDuration ?? 0) + NEXT_TRIAL_DELAY;
   nextTrialTimeout = setTimeout(() => {
     nextTrialTimeout = null;
     startTrial();
-  }, NEXT_TRIAL_DELAY);
+  }, delayUntilNextTrial);
 }
 
 function setupMidi() {
