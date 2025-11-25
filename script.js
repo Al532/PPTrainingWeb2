@@ -60,11 +60,10 @@ const instruments = [
 ];
 
 const midiRange = { min: 36, max: 96 };
+const HIGHLIGHT_DURATION = 800;
 
 const buttonsContainer = document.getElementById("chroma-buttons");
-const feedbackEl = document.getElementById("feedback");
 const midiStatusEl = document.getElementById("midi-status");
-const trialStatusEl = document.getElementById("trial-status");
 const chromaSetSelect = document.getElementById("chroma-set-select");
 
 const notesByChroma = buildNotesByChroma();
@@ -75,6 +74,8 @@ let currentState = {
   midiNote: null,
   awaitingGuess: false,
 };
+
+let nextTrialTimeout = null;
 
 function buildNotesByChroma() {
   const buckets = Array.from({ length: 12 }, () => []);
@@ -97,6 +98,29 @@ function createButtons() {
     btn.addEventListener("click", () => handleAnswer(chroma.index));
     buttonsContainer.appendChild(btn);
   });
+}
+
+function getChromaButton(chromaIndex) {
+  return buttonsContainer.querySelector(`button[data-index="${chromaIndex}"]`);
+}
+
+function resetButtonStates() {
+  buttonsContainer.querySelectorAll("button.chroma").forEach((btn) => {
+    btn.classList.remove("correct", "incorrect");
+  });
+}
+
+function setButtonsDisabled(disabled) {
+  buttonsContainer
+    .querySelectorAll("button.chroma")
+    .forEach((btn) => (btn.disabled = disabled));
+}
+
+function clearScheduledTrial() {
+  if (nextTrialTimeout) {
+    clearTimeout(nextTrialTimeout);
+    nextTrialTimeout = null;
+  }
 }
 
 function populateChromaSetSelect() {
@@ -165,29 +189,21 @@ function pickRandomNote(chromaIndex) {
 
 async function startTrial(attempt = 0) {
   const MAX_ATTEMPTS = 30;
+  clearScheduledTrial();
+  resetButtonStates();
+  setButtonsDisabled(true);
+
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
-    showFeedback("Please select a chroma set to continue.", "error");
-    trialStatusEl.textContent = "Paused";
     currentState.awaitingGuess = false;
     return;
   }
 
   if (attempt >= MAX_ATTEMPTS) {
-    showFeedback(
-      "Unable to find an audio sample within this note range.",
-      "error"
-    );
-    trialStatusEl.textContent = "Paused";
     currentState.awaitingGuess = false;
     return;
   }
-
-  clearFeedback();
-  trialStatusEl.textContent = "Loading a new sample…";
   const chromaIndex = pickRandomChroma();
   if (chromaIndex === null) {
-    showFeedback("Please select a chroma set to continue.", "error");
-    trialStatusEl.textContent = "Paused";
     currentState.awaitingGuess = false;
     return;
   }
@@ -200,6 +216,7 @@ async function startTrial(attempt = 0) {
   }
 
   currentState = { chromaIndex, midiNote, awaitingGuess: true };
+  setButtonsDisabled(false);
   playSample(instrument, midiNote);
 }
 
@@ -207,48 +224,28 @@ function playSample(instrument, midiNote) {
   const audio = new Audio(`assets/${instrument}/${midiNote}.wav`);
   audio
     .play()
-    .then(() => {
-      trialStatusEl.textContent = "Guess the chroma that was played";
-    })
     .catch(() => {
-      showFeedback("Unable to play the audio sample.", "error");
+      // Fail silently to avoid on-screen feedback.
     });
 }
 
 function handleAnswer(chosenChroma) {
   if (!currentState.awaitingGuess) return;
   currentState.awaitingGuess = false;
+  setButtonsDisabled(true);
 
   const isCorrect = chosenChroma === currentState.chromaIndex;
-  if (!isCorrect) {
-    const correctLabel = getChromaLabel(currentState.chromaIndex);
-    showFeedback(`Incorrect answer: ${correctLabel}`, "error");
+  const chosenButton = getChromaButton(chosenChroma);
+  const correctButton = getChromaButton(currentState.chromaIndex);
+
+  if (isCorrect) {
+    chosenButton?.classList.add("correct");
   } else {
-    clearFeedback();
+    chosenButton?.classList.add("incorrect");
+    correctButton?.classList.add("correct");
   }
 
-  setTimeout(() => startTrial(), 500);
-}
-
-function showFeedback(message, type = "") {
-  feedbackEl.textContent = message;
-  feedbackEl.className = `feedback ${type}`.trim();
-}
-
-function clearFeedback() {
-  showFeedback("");
-}
-
-function getChromaLabel(chromaIndex) {
-  if (activeChromaSet) {
-    const inSet = activeChromaSet.chromas.find(
-      (chroma) => chroma.index === chromaIndex
-    );
-    if (inSet) return inSet.label;
-  }
-
-  const fallback = chromas.find((chroma) => chroma.index === chromaIndex);
-  return fallback ? fallback.label : chromaIndex;
+  nextTrialTimeout = setTimeout(() => startTrial(), HIGHLIGHT_DURATION);
 }
 
 function setupMidi() {
