@@ -60,8 +60,10 @@ const instruments = [
 ];
 
 const midiRange = { min: 36, max: 96 };
-const HIGHLIGHT_DURATION = 800;
+const CORRECT_FEEDBACK_DURATION = 800;
+const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 300;
+const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
 
 const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
@@ -149,7 +151,7 @@ function handleStartClick() {
   startTrial();
 }
 
-function scheduleFeedbackReset() {
+function scheduleFeedbackReset(durationMs = CORRECT_FEEDBACK_DURATION) {
   if (feedbackResetTimeout) {
     clearTimeout(feedbackResetTimeout);
   }
@@ -157,7 +159,7 @@ function scheduleFeedbackReset() {
   feedbackResetTimeout = setTimeout(() => {
     resetButtonStates();
     feedbackResetTimeout = null;
-  }, HIGHLIGHT_DURATION);
+  }, durationMs);
 }
 
 function populateChromaSetSelect() {
@@ -168,15 +170,41 @@ function populateChromaSetSelect() {
     chromaSetSelect.appendChild(option);
   });
 
-  chromaSetSelect.value = "0";
+  const savedIndex = loadSavedChromaSetIndex();
+  activeChromaSet = chromaSets[savedIndex];
+  chromaSetSelect.value = String(savedIndex);
   chromaSetSelect.addEventListener("change", handleChromaSetChange);
 }
 
 function handleChromaSetChange(event) {
-  const selectedSet = chromaSets[Number(event.target.value)];
+  const selectedIndex = Number(event.target.value);
+  const selectedSet = chromaSets[selectedIndex];
   if (!selectedSet) return;
   activeChromaSet = selectedSet;
+  saveChromaSetSelection(selectedIndex);
   showStartButton();
+}
+
+function loadSavedChromaSetIndex() {
+  try {
+    const storedValue = localStorage.getItem(LAST_CHROMA_SET_KEY);
+    const parsed = Number.parseInt(storedValue ?? "", 10);
+    if (Number.isInteger(parsed) && chromaSets[parsed]) {
+      return parsed;
+    }
+  } catch (error) {
+    // Ignore storage errors and fall back to default.
+  }
+
+  return 0;
+}
+
+function saveChromaSetSelection(index) {
+  try {
+    localStorage.setItem(LAST_CHROMA_SET_KEY, String(index));
+  } catch (error) {
+    // Ignore storage errors; the selection just won't persist.
+  }
 }
 
 async function checkSampleExists(instrument, midiNote) {
@@ -298,9 +326,9 @@ function fadeOutCurrentAudio() {
 }
 
 function handleAnswer(chosenChroma) {
+  fadeOutCurrentAudio();
   if (!currentState.awaitingGuess) return;
   currentState.awaitingGuess = false;
-  fadeOutCurrentAudio();
   if (feedbackResetTimeout) {
     clearTimeout(feedbackResetTimeout);
     feedbackResetTimeout = null;
@@ -317,7 +345,11 @@ function handleAnswer(chosenChroma) {
     correctButton?.classList.add("correct");
   }
 
-  scheduleFeedbackReset();
+  const feedbackDuration = isCorrect
+    ? CORRECT_FEEDBACK_DURATION
+    : INCORRECT_FEEDBACK_DURATION;
+
+  scheduleFeedbackReset(feedbackDuration);
   scheduleNextTrial();
 }
 
