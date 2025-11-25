@@ -402,9 +402,8 @@ function handleMidiMessage(message) {
   const [status, data1, data2] = message.data;
   const isNoteOn = (status & 0xf0) === 0x90 && data2 > 0;
   if (!isNoteOn) return;
-  fadeOutCurrentAudio();
   const chromaIndex = data1 % 12;
-  handleAnswer(chromaIndex, { shouldFadeOut: false });
+  handleAnswer(chromaIndex);
 }
 
 function init() {
