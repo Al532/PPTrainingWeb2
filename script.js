@@ -34,7 +34,7 @@ const chromaLookup = {
 };
 
 const chromaSets = [
-  { name: "Thirds 1", notes: ["C", "E", "G#"] },
+  { name: "Thirds 1", notes: ["C", "E", "Ab"] },
   { name: "Thirds 2", notes: ["C#", "F", "A"] },
   { name: "Thirds 3", notes: ["D", "F#", "Bb"] },
   { name: "Thirds 4", notes: ["Eb", "G", "B"] },
