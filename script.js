@@ -13,6 +13,39 @@ const chromas = [
   { label: "B", index: 11 },
 ];
 
+const chromaLookup = {
+  C: 0,
+  "C#": 1,
+  Db: 1,
+  D: 2,
+  "D#": 3,
+  Eb: 3,
+  E: 4,
+  F: 5,
+  "F#": 6,
+  Gb: 6,
+  G: 7,
+  "G#": 8,
+  Ab: 8,
+  A: 9,
+  "A#": 10,
+  Bb: 10,
+  B: 11,
+};
+
+const chromaSets = [
+  { name: "Thirds 1", notes: ["C", "E", "G#"] },
+  { name: "Thirds 2", notes: ["C#", "F", "A"] },
+  { name: "Thirds 3", notes: ["D", "F#", "Bb"] },
+  { name: "Thirds 4", notes: ["Eb", "G", "B"] },
+  { name: "Minor thirds 1", notes: ["C", "Eb", "F#", "A"] },
+  { name: "Minor thirds 2", notes: ["C#", "E", "G", "Bb"] },
+  { name: "Minor thirds 3", notes: ["D", "F", "Ab", "B"] },
+].map((set) => ({
+  label: `${set.name}: ${set.notes.join(", ")}`,
+  chromas: set.notes.map((note) => ({ label: note, index: chromaLookup[note] })),
+}));
+
 const instruments = [
   "Bassoon",
   "Cellos",
@@ -32,9 +65,11 @@ const buttonsContainer = document.getElementById("chroma-buttons");
 const feedbackEl = document.getElementById("feedback");
 const midiStatusEl = document.getElementById("midi-status");
 const trialStatusEl = document.getElementById("trial-status");
+const chromaSetSelect = document.getElementById("chroma-set-select");
 
 const notesByChroma = buildNotesByChroma();
 const availabilityCache = new Map();
+let activeChromaSet = chromaSets[0];
 let currentState = {
   chromaIndex: null,
   midiNote: null,
@@ -50,14 +85,38 @@ function buildNotesByChroma() {
 }
 
 function createButtons() {
-  chromas.forEach((chroma) => {
+  if (!activeChromaSet) return;
+
+  buttonsContainer.innerHTML = "";
+  activeChromaSet.chromas.forEach((chroma) => {
     const btn = document.createElement("button");
+    btn.type = "button";
     btn.className = "chroma";
     btn.textContent = chroma.label;
     btn.dataset.index = chroma.index;
     btn.addEventListener("click", () => handleAnswer(chroma.index));
     buttonsContainer.appendChild(btn);
   });
+}
+
+function populateChromaSetSelect() {
+  chromaSets.forEach((set, index) => {
+    const option = document.createElement("option");
+    option.value = index;
+    option.textContent = set.label;
+    chromaSetSelect.appendChild(option);
+  });
+
+  chromaSetSelect.value = "0";
+  chromaSetSelect.addEventListener("change", handleChromaSetChange);
+}
+
+function handleChromaSetChange(event) {
+  const selectedSet = chromaSets[Number(event.target.value)];
+  if (!selectedSet) return;
+  activeChromaSet = selectedSet;
+  createButtons();
+  startTrial();
 }
 
 async function checkSampleExists(instrument, midiNote) {
@@ -93,7 +152,9 @@ async function pickInstrumentForNote(midiNote) {
 }
 
 function pickRandomChroma() {
-  return Math.floor(Math.random() * chromas.length);
+  if (!activeChromaSet || !activeChromaSet.chromas.length) return null;
+  const idx = Math.floor(Math.random() * activeChromaSet.chromas.length);
+  return activeChromaSet.chromas[idx].index;
 }
 
 function pickRandomNote(chromaIndex) {
@@ -104,19 +165,32 @@ function pickRandomNote(chromaIndex) {
 
 async function startTrial(attempt = 0) {
   const MAX_ATTEMPTS = 30;
+  if (!activeChromaSet || !activeChromaSet.chromas.length) {
+    showFeedback("Please select a chroma set to continue.", "error");
+    trialStatusEl.textContent = "Paused";
+    currentState.awaitingGuess = false;
+    return;
+  }
+
   if (attempt >= MAX_ATTEMPTS) {
     showFeedback(
-      "Impossible de trouver un échantillon audio pour cette plage de notes.",
+      "Unable to find an audio sample within this note range.",
       "error"
     );
-    trialStatusEl.textContent = "En pause";
+    trialStatusEl.textContent = "Paused";
     currentState.awaitingGuess = false;
     return;
   }
 
   clearFeedback();
-  trialStatusEl.textContent = "Lecture d'un nouvel échantillon…";
+  trialStatusEl.textContent = "Loading a new sample…";
   const chromaIndex = pickRandomChroma();
+  if (chromaIndex === null) {
+    showFeedback("Please select a chroma set to continue.", "error");
+    trialStatusEl.textContent = "Paused";
+    currentState.awaitingGuess = false;
+    return;
+  }
   const midiNote = pickRandomNote(chromaIndex);
   const instrument = await pickInstrumentForNote(midiNote);
 
@@ -134,10 +208,10 @@ function playSample(instrument, midiNote) {
   audio
     .play()
     .then(() => {
-      trialStatusEl.textContent = "Devinez le chroma joué";
+      trialStatusEl.textContent = "Guess the chroma that was played";
     })
     .catch(() => {
-      showFeedback("Impossible de lire l'échantillon audio.", "error");
+      showFeedback("Unable to play the audio sample.", "error");
     });
 }
 
@@ -147,7 +221,8 @@ function handleAnswer(chosenChroma) {
 
   const isCorrect = chosenChroma === currentState.chromaIndex;
   if (!isCorrect) {
-    showFeedback(`Mauvaise réponse : ${chromas[currentState.chromaIndex].label}`, "error");
+    const correctLabel = getChromaLabel(currentState.chromaIndex);
+    showFeedback(`Incorrect answer: ${correctLabel}`, "error");
   } else {
     clearFeedback();
   }
@@ -164,9 +239,21 @@ function clearFeedback() {
   showFeedback("");
 }
 
+function getChromaLabel(chromaIndex) {
+  if (activeChromaSet) {
+    const inSet = activeChromaSet.chromas.find(
+      (chroma) => chroma.index === chromaIndex
+    );
+    if (inSet) return inSet.label;
+  }
+
+  const fallback = chromas.find((chroma) => chroma.index === chromaIndex);
+  return fallback ? fallback.label : chromaIndex;
+}
+
 function setupMidi() {
   if (!navigator.requestMIDIAccess) {
-    midiStatusEl.textContent = "MIDI non supporté par ce navigateur";
+    midiStatusEl.textContent = "MIDI not supported by this browser";
     midiStatusEl.classList.add("muted");
     return;
   }
@@ -174,7 +261,7 @@ function setupMidi() {
   navigator
     .requestMIDIAccess()
     .then((access) => {
-      midiStatusEl.textContent = "MIDI connecté";
+      midiStatusEl.textContent = "MIDI connected";
       midiStatusEl.classList.remove("muted");
       access.inputs.forEach((input) => {
         input.onmidimessage = handleMidiMessage;
@@ -187,7 +274,7 @@ function setupMidi() {
       };
     })
     .catch(() => {
-      midiStatusEl.textContent = "Accès MIDI refusé";
+      midiStatusEl.textContent = "MIDI access denied";
       midiStatusEl.classList.add("muted");
     });
 }
@@ -201,6 +288,7 @@ function handleMidiMessage(message) {
 }
 
 function init() {
+  populateChromaSetSelect();
   createButtons();
   setupMidi();
   startTrial();

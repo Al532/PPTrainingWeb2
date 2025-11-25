@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,19 +9,23 @@
 <body>
   <header>
     <h1>Ear Training MIDI</h1>
-    <p>Écoutez l'échantillon joué, puis identifiez le chroma en cliquant sur un bouton ou en jouant la note correspondante sur votre clavier MIDI.</p>
+    <p>Listen to the played sample, then identify the chroma by clicking a button or playing the matching note on your MIDI keyboard.</p>
   </header>
 
   <main>
     <section class="status">
       <div class="status-row">
-        <div id="midi-status" class="pill muted">MIDI : détection…</div>
-        <div id="trial-status" class="pill">Nouvelle note en cours…</div>
+        <div id="midi-status" class="pill muted">MIDI: detecting…</div>
+        <div id="trial-status" class="pill">New note loading…</div>
       </div>
       <div id="feedback" class="feedback" aria-live="polite"></div>
     </section>
 
     <section class="controls" aria-label="Chromas">
+      <div class="controls-row">
+        <label for="chroma-set-select">Chroma set</label>
+        <select id="chroma-set-select"></select>
+      </div>
       <div id="chroma-buttons" class="buttons"></div>
     </section>
   </main>
