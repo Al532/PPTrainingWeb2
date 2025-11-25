@@ -325,8 +325,10 @@ function fadeOutCurrentAudio() {
   requestAnimationFrame(step);
 }
 
-function handleAnswer(chosenChroma) {
-  fadeOutCurrentAudio();
+function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
+  if (shouldFadeOut) {
+    fadeOutCurrentAudio();
+  }
   if (!currentState.awaitingGuess) return;
   currentState.awaitingGuess = false;
   if (feedbackResetTimeout) {
@@ -400,8 +402,9 @@ function handleMidiMessage(message) {
   const [status, data1, data2] = message.data;
   const isNoteOn = (status & 0xf0) === 0x90 && data2 > 0;
   if (!isNoteOn) return;
+  fadeOutCurrentAudio();
   const chromaIndex = data1 % 12;
-  handleAnswer(chromaIndex);
+  handleAnswer(chromaIndex, { shouldFadeOut: false });
 }
 
 function init() {
