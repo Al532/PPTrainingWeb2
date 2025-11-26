@@ -299,13 +299,13 @@ function playSample(instrument, midiNote) {
 }
 
 function fadeOutCurrentAudio() {
-	log("fadeOut");
+	console.log("fadeOut");
   const audio = currentAudio;
   if (!audio) return;
 
   const fadeDurationMs = 200;
   const startVolume = audio.volume;
-  log("startvolume",startVolume);
+  console.log("startvolume",startVolume);
   const startTime = performance.now();
 
   function step(now) {
@@ -328,7 +328,7 @@ function fadeOutCurrentAudio() {
 }
 
 function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
-	log("handleAnswer");
+	console.log("handleAnswer");
 	fadeOutCurrentAudio();
   if (!currentState.awaitingGuess) return;
 
