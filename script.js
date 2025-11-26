@@ -305,18 +305,6 @@ function fadeOutCurrentAudio() {
   const fadeDurationMs = 200;
   const startVolume = audio.volume;
   const startTime = performance.now();
-  let finished = false;
-
-  function finishFade() {
-    if (finished) return;
-    finished = true;
-    audio.volume = 0;
-    audio.pause();
-    audio.currentTime = 0;
-    if (currentAudio === audio) {
-      currentAudio = null;
-    }
-  }
 
   function step(now) {
     const elapsed = now - startTime;
@@ -326,12 +314,19 @@ function fadeOutCurrentAudio() {
     if (progress < 1) {
       requestAnimationFrame(step);
     } else {
+<<<<<<< HEAD
       fadeOutCurrentAudio();
+=======
+      audio.pause();
+      audio.currentTime = 0;
+      if (currentAudio === audio) {
+        currentAudio = null;
+      }
+>>>>>>> parent of d5f7894 (Ensure audio stops even when fade animation stalls)
     }
   }
 
   requestAnimationFrame(step);
-  setTimeout(finishFade, fadeDurationMs + 50);
 }
 
 function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
