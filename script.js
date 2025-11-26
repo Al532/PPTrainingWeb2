@@ -78,7 +78,7 @@ const midiStatusEl = document.getElementById("midi-status");
 const chromaSetSelect = document.getElementById("chroma-set-select");
 
 const notesByChroma = buildNotesByChroma();
-let instrumentAvailabilityPromise = null;
+const availabilityCache = new Map();
 let activeChromaSet = chromaSets[0];
 let currentState = {
   chromaIndex: null,
@@ -215,46 +215,33 @@ function saveChromaSetSelection(index) {
   }
 }
 
-async function loadInstrumentAvailability() {
-  if (instrumentAvailabilityPromise) return instrumentAvailabilityPromise;
-
-  instrumentAvailabilityPromise = buildAvailabilityManifest();
-  return instrumentAvailabilityPromise;
-}
-
-async function buildAvailabilityManifest() {
-  const availability = {};
-
-  for (const instrument of instruments) {
-    const availableNotes = new Set();
-    for (let midiNote = midiRange.min; midiNote <= midiRange.max; midiNote += 1) {
-      const exists = await sampleExists(instrument, midiNote);
-      if (exists) {
-        availableNotes.add(midiNote);
-      }
-    }
-    if (availableNotes.size) {
-      availability[instrument] = availableNotes;
-    }
+async function checkSampleExists(instrument, midiNote) {
+  const key = `${instrument}-${midiNote}`;
+  if (availabilityCache.has(key)) {
+    return availabilityCache.get(key);
   }
 
-  return availability;
-}
-
-async function sampleExists(instrument, midiNote) {
   try {
-    const response = await fetch(`assets/${instrument}/${midiNote}.wav`, { method: "HEAD" });
-    return response.ok;
+    const response = await fetch(`assets/${instrument}/${midiNote}.wav`, {
+      method: "HEAD",
+    });
+    const ok = response.ok;
+    availabilityCache.set(key, ok);
+    return ok;
   } catch (error) {
+    availabilityCache.set(key, false);
     return false;
   }
 }
 
 async function pickInstrumentForNote(midiNote) {
-  const availability = await loadInstrumentAvailability();
-  const available = instruments.filter((instrument) =>
-    availability[instrument]?.has(midiNote)
+  const checks = await Promise.all(
+    instruments.map(async (instrument) => {
+      const hasSample = await checkSampleExists(instrument, midiNote);
+      return hasSample ? instrument : null;
+    })
   );
+  const available = checks.filter(Boolean);
   if (!available.length) return null;
   const index = Math.floor(Math.random() * available.length);
   return available[index];
