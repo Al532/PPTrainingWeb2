@@ -3,6 +3,7 @@ const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
 const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
+const FADE_DURATION_MS = 100;
 
 
 const chromas = [
@@ -333,7 +334,7 @@ function fadeOutCurrentAudio() {
   const audio = currentAudio;
   if (!audio) return;
 
-  const fadeDurationMs = 200;
+  const fadeDurationMs = FADE_DURATION_MS;
   const startVolume = audio.volume;
   const startTime = performance.now();
 
