@@ -71,6 +71,19 @@ const instruments = [
   "Violins",
 ];
 
+const instrumentRanges = {
+  Bassoon: { min: 36, max: 79 },
+  Cellos: { min: 36, max: 80 },
+  Clarinet: { min: 50, max: 92 },
+  Flute: { min: 60, max: 96 },
+  Harp: { min: 36, max: 96 },
+  Horn: { min: 36, max: 79 },
+  Oboe: { min: 58, max: 93 },
+  Piano: { min: 36, max: 96 },
+  Trumpet: { min: 52, max: 91 },
+  Violins: { min: 55, max: 96 },
+};
+
 const midiRange = { min: 36, max: 96 };
 const CORRECT_FEEDBACK_DURATION = 800;
 const INCORRECT_FEEDBACK_DURATION = 1500;
@@ -241,6 +254,10 @@ async function checkSampleExists(instrument, midiNote) {
 async function pickInstrumentForNote(midiNote) {
   const checks = await Promise.all(
     instruments.map(async (instrument) => {
+      const range = instrumentRanges[instrument];
+      if (range && (midiNote < range.min || midiNote > range.max)) {
+        return null;
+      }
       const hasSample = await checkSampleExists(instrument, midiNote);
       return hasSample ? instrument : null;
     })
