@@ -326,7 +326,7 @@ function fadeOutCurrentAudio() {
     if (progress < 1) {
       requestAnimationFrame(step);
     } else {
-      finishFade();
+      fadeOutCurrentAudio();
     }
   }
 
