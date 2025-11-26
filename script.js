@@ -3,11 +3,6 @@ const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
 const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
-const STATS_STORAGE_KEY = "ppt-level-stats";
-const PROMOTION_MIN_TRIALS = 1000;
-const PROMOTION_MIN_ACCURACY = 0.99;
-const STRUGGLE_MIN_TRIALS = 120;
-const STRUGGLE_MAX_ACCURACY = 0.6;
 const FADE_DURATION_MS = 100;
 
 
@@ -101,13 +96,10 @@ const instrumentRanges = {
 const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
 const chromaSetSelect = document.getElementById("chroma-set-select");
-const levelStatusEl = document.getElementById("level-status");
-const levelAdviceEl = document.getElementById("level-advice");
 
 const notesByChroma = buildNotesByChroma();
 const availabilityCache = new Map();
 let activeChromaSet = chromaSets[0];
-let levelStats = loadStats();
 let currentState = {
   chromaIndex: null,
   midiNote: null,
@@ -237,7 +229,6 @@ function populateChromaSetSelect() {
   activeChromaSet = chromaSets[savedIndex];
   chromaSetSelect.value = String(savedIndex);
   chromaSetSelect.addEventListener("change", handleChromaSetChange);
-  updateLevelStatus();
 }
 
 function handleChromaSetChange(event) {
@@ -247,7 +238,6 @@ function handleChromaSetChange(event) {
   activeChromaSet = selectedSet;
   saveChromaSetSelection(selectedIndex);
   showStartButton();
-  updateLevelStatus();
 }
 
 function loadSavedChromaSetIndex() {
@@ -270,41 +260,6 @@ function saveChromaSetSelection(index) {
   } catch (error) {
     // Ignore storage errors; the selection just won't persist.
   }
-}
-
-function loadStats() {
-  try {
-    const raw = localStorage.getItem(STATS_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") {
-      return parsed;
-    }
-  } catch (error) {
-    // Ignore malformed data and start fresh.
-  }
-  return {};
-}
-
-function saveStats() {
-  try {
-    localStorage.setItem(STATS_STORAGE_KEY, JSON.stringify(levelStats));
-  } catch (error) {
-    // If storage fails, stats just won't persist.
-  }
-}
-
-function getActiveSetKey() {
-  return activeChromaSet?.label ?? "";
-}
-
-function getActiveSetStats() {
-  const key = getActiveSetKey();
-  const stats = levelStats[key] ?? { attempts: 0, correct: 0 };
-  if (!levelStats[key]) {
-    levelStats[key] = stats;
-  }
-  return stats;
 }
 
 async function checkSampleExists(instrument, midiNote) {
@@ -472,68 +427,6 @@ function scheduleAudioFade(feedbackDuration) {
   }, fadeDelay);
 }
 
-function calculateAccuracy(stats) {
-  if (!stats.attempts) return null;
-  return stats.correct / stats.attempts;
-}
-
-function formatAccuracy(accuracy) {
-  if (accuracy === null) return "—";
-  return `${Math.round(accuracy * 1000) / 10}%`;
-}
-
-function updateLevelStatus() {
-  if (!activeChromaSet || !levelStatusEl || !levelAdviceEl) return;
-
-  const stats = getActiveSetStats();
-  const accuracy = calculateAccuracy(stats);
-  const levelIndex = chromaSets.indexOf(activeChromaSet);
-  const nextSet = chromaSets[levelIndex + 1];
-  const previousSet = chromaSets[levelIndex - 1];
-  const promotionReady =
-    stats.attempts >= PROMOTION_MIN_TRIALS && (accuracy ?? 0) >= PROMOTION_MIN_ACCURACY;
-  const struggling =
-    stats.attempts >= STRUGGLE_MIN_TRIALS && (accuracy ?? 1) < STRUGGLE_MAX_ACCURACY;
-
-  const statusPieces = [`Niveau ${levelIndex + 1}/${chromaSets.length}`];
-  statusPieces.push(activeChromaSet.label);
-  if (stats.attempts > 0) {
-    statusPieces.push(
-      `${formatAccuracy(accuracy)} · ${stats.attempts} écoute${stats.attempts > 1 ? "s" : ""}`
-    );
-  }
-
-  levelStatusEl.textContent = statusPieces.join(" · ");
-  levelStatusEl.classList.toggle("muted", false);
-
-  let advice = "Entraîne-toi pour obtenir une recommandation de niveau.";
-  if (stats.attempts === 0) {
-    advice = "Joue quelques exemples pour calibrer ton niveau.";
-  } else if (promotionReady) {
-    advice = nextSet
-      ? `Bravo ! Avec ${formatAccuracy(accuracy)} sur ${stats.attempts} écoutes, teste le niveau ${
-          levelIndex + 2
-        } (${nextSet.label}).`
-      : "Tu maîtrises déjà le dernier niveau. Continue à t'entraîner pour garder ton oreille affûtée !";
-  } else if (struggling && previousSet) {
-    advice = `Ce niveau semble difficile (${formatAccuracy(accuracy)} sur ${stats.attempts} écoutes). Essaie le niveau ${
-      levelIndex
-    } (${previousSet.label}) pour consolider.`;
-  } else if ((accuracy ?? 1) < PROMOTION_MIN_ACCURACY) {
-    advice = `Progresse vers ${Math.round(PROMOTION_MIN_ACCURACY * 100)}% de bonnes réponses pour monter de niveau.`;
-  } else {
-    const remaining = Math.max(PROMOTION_MIN_TRIALS - stats.attempts, 0);
-    advice = remaining
-      ? `Encore ${remaining} écoute${remaining > 1 ? "s" : ""} à ${
-          Math.round(PROMOTION_MIN_ACCURACY * 100)
-        }% ou plus pour débloquer le niveau suivant.`
-      : "Garde ce taux de réussite pour valider la montée de niveau !";
-  }
-
-  levelAdviceEl.textContent = advice;
-  levelAdviceEl.classList.toggle("muted", false);
-}
-
 function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
 
   if (!currentState.awaitingGuess) return;
@@ -559,8 +452,6 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     ? CORRECT_FEEDBACK_DURATION
     : INCORRECT_FEEDBACK_DURATION;
 
-  recordAttempt(isCorrect);
-
   if (shouldFadeOut) {
     scheduleAudioFade(feedbackDuration);
   }
@@ -568,21 +459,6 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
   preparePendingTrial();
   scheduleFeedbackReset(feedbackDuration);
   scheduleNextTrial(feedbackDuration);
-}
-
-function recordAttempt(isCorrect) {
-  const key = getActiveSetKey();
-  if (!key) return;
-
-  const stats = getActiveSetStats();
-  stats.attempts += 1;
-  if (isCorrect) {
-    stats.correct += 1;
-  }
-
-  levelStats[key] = stats;
-  saveStats();
-  updateLevelStatus();
 }
 
 function cancelNextTrialTimeout() {
