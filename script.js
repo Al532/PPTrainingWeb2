@@ -355,7 +355,6 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     ? CORRECT_FEEDBACK_DURATION
     : INCORRECT_FEEDBACK_DURATION;
 
-  fadeOutCurrentAudio();
   scheduleFeedbackReset(feedbackDuration);
   scheduleNextTrial(feedbackDuration);
 }
