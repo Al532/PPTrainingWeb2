@@ -326,6 +326,7 @@ function fadeOutCurrentAudio() {
 }
 
 function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
+	 fadeOutCurrentAudio();
   if (!currentState.awaitingGuess) return;
 
   if (shouldFadeOut) {
