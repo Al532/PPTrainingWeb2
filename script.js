@@ -335,10 +335,11 @@ function fadeOutCurrentAudio() {
 }
 
 function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
+  if (!currentState.awaitingGuess) return;
+
   if (shouldFadeOut) {
     fadeOutCurrentAudio();
   }
-  if (!currentState.awaitingGuess) return;
   currentState.awaitingGuess = false;
   if (feedbackResetTimeout) {
     clearTimeout(feedbackResetTimeout);
@@ -413,7 +414,7 @@ function handleMidiMessage(message) {
   const isNoteOn = (status & 0xf0) === 0x90 && data2 > 0;
   if (!isNoteOn) return;
   const chromaIndex = data1 % 12;
-  
+
   handleAnswer(chromaIndex);
 }
 
