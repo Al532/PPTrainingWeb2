@@ -455,7 +455,7 @@ function setupMidi() {
   }
 
   navigator
-    .requestMIDIAccess()
+    .requestMIDIAccess({ sysex: false })
     .then((access) => {
       midiStatusEl.textContent = "MIDI connected";
       midiStatusEl.classList.remove("muted");
