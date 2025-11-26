@@ -107,8 +107,27 @@ let currentState = {
 };
 let feedbackResetTimeout = null;
 let currentAudio = null;
+let currentAudioGainNode = null;
 let nextTrialTimeout = null;
 let lastMidiNotePlayed = null;
+const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+let audioContext = null;
+
+function getAudioContext() {
+  if (!AudioContextClass) return null;
+
+  if (!audioContext) {
+    audioContext = new AudioContextClass();
+  }
+
+  if (audioContext.state === "suspended") {
+    audioContext.resume().catch(() => {
+      // Ignore errors resuming the audio context (e.g., autoplay policies).
+    });
+  }
+
+  return audioContext;
+}
 
 function buildNotesByChroma() {
   const buckets = Array.from({ length: 12 }, () => []);
@@ -319,8 +338,20 @@ async function startTrial(attempt = 0) {
 }
 
 function playSample(instrument, midiNote) {
+  const context = getAudioContext();
   const audio = new Audio(`assets/${instrument}/${midiNote}.wav`);
-  audio.volume = 1;
+  if (context) {
+    const source = context.createMediaElementSource(audio);
+    const gainNode = context.createGain();
+
+    gainNode.gain.setValueAtTime(1, context.currentTime);
+    source.connect(gainNode).connect(context.destination);
+
+    currentAudioGainNode = gainNode;
+  } else {
+    currentAudioGainNode = null;
+  }
+
   currentAudio = audio;
 
   audio
@@ -332,29 +363,37 @@ function playSample(instrument, midiNote) {
 
 function fadeOutCurrentAudio() {
   const audio = currentAudio;
+  const gainNode = currentAudioGainNode;
   if (!audio) return;
 
-  const fadeDurationMs = FADE_DURATION_MS;
-  const startVolume = audio.volume;
-  const startTime = performance.now();
-
-  function step() {
-    const elapsed = performance.now() - startTime;
-    const progress = Math.min(elapsed / fadeDurationMs, 1);
-    audio.volume = Math.max(startVolume * (1 - progress), 0);
-
-    if (progress < 1) {
-      requestAnimationFrame(step);
-    } else {
-      audio.pause();
-      audio.currentTime = 0;
-      if (currentAudio === audio) {
-        currentAudio = null;
-      }
+  if (!gainNode) {
+    audio.pause();
+    audio.currentTime = 0;
+    if (currentAudio === audio) {
+      currentAudio = null;
     }
+    return;
   }
 
-  requestAnimationFrame(step);
+  const context = getAudioContext();
+  const fadeDurationSeconds = FADE_DURATION_MS / 1000;
+  const now = context.currentTime;
+
+  gainNode.gain.cancelScheduledValues(now);
+  gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+  gainNode.gain.linearRampToValueAtTime(0, now + fadeDurationSeconds);
+
+  const cleanup = () => {
+    audio.pause();
+    audio.currentTime = 0;
+    gainNode.disconnect();
+    if (currentAudio === audio) {
+      currentAudio = null;
+      currentAudioGainNode = null;
+    }
+  };
+
+  setTimeout(cleanup, FADE_DURATION_MS);
 }
 
 function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
