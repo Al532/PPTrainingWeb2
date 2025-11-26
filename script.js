@@ -299,13 +299,11 @@ function playSample(instrument, midiNote) {
 }
 
 function fadeOutCurrentAudio() {
-	console.log("fadeOut");
   const audio = currentAudio;
   if (!audio) return;
 
   const fadeDurationMs = 200;
   const startVolume = audio.volume;
-  console.log("startvolume",startVolume);
   const startTime = performance.now();
 
   function step() {
