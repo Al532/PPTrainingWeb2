@@ -300,7 +300,7 @@ function playSample(instrument, midiNote) {
 
 function fadeOutCurrentAudio() {
   const audio = currentAudio;
- // if (!audio) return;
+  if (!audio) return;
 
   const fadeDurationMs = 200;
   const startVolume = audio.volume;
