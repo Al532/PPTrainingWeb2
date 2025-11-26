@@ -74,7 +74,7 @@ const instruments = [
 const midiRange = { min: 36, max: 96 };
 const CORRECT_FEEDBACK_DURATION = 800;
 const INCORRECT_FEEDBACK_DURATION = 1500;
-const NEXT_TRIAL_DELAY = 300;
+const NEXT_TRIAL_DELAY = 50;
 const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
 
 const buttonsContainer = document.getElementById("chroma-buttons");
