@@ -175,12 +175,15 @@ function resetButtonStates() {
   });
 }
 
+/* 
 function resetButtonFocus() {
   const activeElement = document.activeElement;
   if (activeElement && typeof activeElement.blur === "function") {
     activeElement.blur();
   }
 }
+*/
+
 
 function resetTrialState() {
   cancelNextTrialTimeout();
