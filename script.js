@@ -112,6 +112,9 @@ let nextTrialTimeout = null;
 let lastMidiNotePlayed = null;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 let audioContext = null;
+let pendingTrial = null;
+let pendingPreparationPromise = null;
+let pendingPreparationToken = 0;
 
 function getAudioContext() {
   if (!AudioContextClass) return null;
@@ -193,6 +196,7 @@ function resetTrialState() {
   }
   resetButtonStates();
   currentState = { chromaIndex: null, midiNote: null, awaitingGuess: false };
+  clearPendingTrial();
 }
 
 function handleStartClick() {
@@ -307,41 +311,43 @@ function pickRandomNote(chromaIndex) {
 }
 
 async function startTrial(attempt = 0) {
-  const MAX_ATTEMPTS = 30;
-
   cancelNextTrialTimeout();
   resetButtonFocus();
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
+    clearPendingTrial();
     return;
   }
 
-  if (attempt >= MAX_ATTEMPTS) {
+  let trial = pendingTrial;
+  pendingTrial = null;
+
+  if (!trial) {
+    trial = await findPlayableTrial(attempt);
+  }
+
+  if (!trial) {
     currentState.awaitingGuess = false;
-    return;
-  }
-  const chromaIndex = pickRandomChroma();
-  if (chromaIndex === null) {
-    currentState.awaitingGuess = false;
-    return;
-  }
-  const midiNote = pickRandomNote(chromaIndex);
-  const instrument = await pickInstrumentForNote(midiNote);
-
-  if (!instrument) {
-    startTrial(attempt + 1);
+    clearPendingTrial();
     return;
   }
 
-  currentState = { chromaIndex, midiNote, awaitingGuess: true };
-  lastMidiNotePlayed = midiNote;
-  playSample(instrument, midiNote);
+  currentState = {
+    chromaIndex: trial.chromaIndex,
+    midiNote: trial.midiNote,
+    awaitingGuess: true,
+  };
+  lastMidiNotePlayed = trial.midiNote;
+  playPreparedTrial(trial);
+  preparePendingTrial();
 }
 
-function playSample(instrument, midiNote) {
+function playPreparedTrial(trial) {
+  const { instrument, midiNote, audioElement } = trial;
   const context = getAudioContext();
-  const audio = new Audio(`assets/${instrument}/${midiNote}.wav`);
+  const audio = audioElement ?? new Audio(`assets/${instrument}/${midiNote}.wav`);
+  audio.currentTime = 0;
   if (context) {
     const source = context.createMediaElementSource(audio);
     const gainNode = context.createGain();
@@ -426,6 +432,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     ? CORRECT_FEEDBACK_DURATION
     : INCORRECT_FEEDBACK_DURATION;
 
+  preparePendingTrial();
   scheduleFeedbackReset(feedbackDuration);
   scheduleNextTrial(feedbackDuration);
 }
@@ -444,6 +451,77 @@ function scheduleNextTrial(feedbackDuration) {
     nextTrialTimeout = null;
     startTrial();
   }, delayUntilNextTrial);
+  if (!pendingTrial && !pendingPreparationPromise) {
+    preparePendingTrial();
+  }
+}
+
+function clearPendingTrial() {
+  pendingTrial = null;
+  pendingPreparationPromise = null;
+  pendingPreparationToken += 1;
+}
+
+async function preparePendingTrial() {
+  if (pendingTrial) return pendingTrial;
+  if (pendingPreparationPromise) return pendingPreparationPromise;
+
+  const token = pendingPreparationToken;
+  pendingPreparationPromise = (async () => {
+    const trial = await findPlayableTrial();
+    if (token !== pendingPreparationToken) {
+      pendingPreparationPromise = null;
+      return null;
+    }
+    pendingTrial = trial;
+    pendingPreparationPromise = null;
+    return trial;
+  })();
+
+  return pendingPreparationPromise;
+}
+
+async function findPlayableTrial(attempt = 0) {
+  const MAX_ATTEMPTS = 30;
+  if (!activeChromaSet || !activeChromaSet.chromas.length) return null;
+  if (attempt >= MAX_ATTEMPTS) return null;
+
+  const chromaIndex = pickRandomChroma();
+  if (chromaIndex === null) return null;
+
+  const midiNote = pickRandomNote(chromaIndex);
+  const instrument = await pickInstrumentForNote(midiNote);
+
+  if (!instrument) {
+    return findPlayableTrial(attempt + 1);
+  }
+
+  const audioElement = await prepareAudioElement(instrument, midiNote);
+  if (!audioElement) {
+    return findPlayableTrial(attempt + 1);
+  }
+
+  return { chromaIndex, midiNote, instrument, audioElement };
+}
+
+async function prepareAudioElement(instrument, midiNote) {
+  const src = `assets/${instrument}/${midiNote}.wav`;
+  const audio = new Audio(src);
+  audio.preload = "auto";
+
+  try {
+    await fetch(src, { method: "GET" });
+  } catch (error) {
+    return null;
+  }
+
+  try {
+    audio.load();
+  } catch (error) {
+    // Ignore load errors; rely on the fetch above.
+  }
+
+  return audio;
 }
 
 function setupMidi() {
