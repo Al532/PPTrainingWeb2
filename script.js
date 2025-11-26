@@ -115,6 +115,7 @@ let audioContext = null;
 let pendingTrial = null;
 let pendingPreparationPromise = null;
 let pendingPreparationToken = 0;
+let fadeTimeout = null;
 
 function getAudioContext() {
   if (!AudioContextClass) return null;
@@ -189,6 +190,7 @@ function resetButtonFocus() {
 
 function resetTrialState() {
   cancelNextTrialTimeout();
+  cancelScheduledFade();
   fadeOutCurrentAudio();
   if (feedbackResetTimeout) {
     clearTimeout(feedbackResetTimeout);
@@ -370,6 +372,7 @@ function playPreparedTrial(trial) {
 }
 
 function fadeOutCurrentAudio() {
+  cancelScheduledFade();
   const audio = currentAudio;
   const gainNode = currentAudioGainNode;
   if (!audio) return;
@@ -404,13 +407,30 @@ function fadeOutCurrentAudio() {
   setTimeout(cleanup, FADE_DURATION_MS);
 }
 
+function cancelScheduledFade() {
+  if (fadeTimeout) {
+    clearTimeout(fadeTimeout);
+    fadeTimeout = null;
+  }
+}
+
+function scheduleAudioFade(feedbackDuration) {
+  if (!currentAudio) return;
+
+  cancelScheduledFade();
+
+  const fadeDelay = Math.max((feedbackDuration ?? 0) - FADE_DURATION_MS, 0);
+
+  fadeTimeout = setTimeout(() => {
+    fadeTimeout = null;
+    fadeOutCurrentAudio();
+  }, fadeDelay);
+}
+
 function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
 
   if (!currentState.awaitingGuess) return;
 
-  if (shouldFadeOut) {
-    fadeOutCurrentAudio();
-  }
   currentState.awaitingGuess = false;
   if (feedbackResetTimeout) {
     clearTimeout(feedbackResetTimeout);
@@ -431,6 +451,10 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
   const feedbackDuration = isCorrect
     ? CORRECT_FEEDBACK_DURATION
     : INCORRECT_FEEDBACK_DURATION;
+
+  if (shouldFadeOut) {
+    scheduleAudioFade(feedbackDuration);
+  }
 
   preparePendingTrial();
   scheduleFeedbackReset(feedbackDuration);
