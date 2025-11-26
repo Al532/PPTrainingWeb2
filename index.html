@@ -1,33 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ear Training - Chromas</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PP Training Web</title>
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="alternate icon" sizes="32x32" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAqElEQVR42mPgFRT/P5CYYdQBow7AJvjs7WeiMKlqh74D0OVJVTvqgFEHjDpg6Dtg5JaExjHdWDE2tTSpjCKW/ceKQY6gqgNgPiM2BECOwKaWZAcgG4jNUFyasTkWFjLEOoQB2WJcIYDPAGwhgGweQQdgczElDkAPUUKhwYBNklIHIEcReuii28dAqqGkqkVPX+iOoVujFD33wPCAtIoHJARGOyajDsCFATdA4CpJ2hs1AAAAAElFTkSuQmCC">
+  <link rel="alternate icon" sizes="192x192" href="data:image/png;base64,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">
 </head>
 <body>
-  <header>
-    <h1>Perfect Pitch Training</h1>
-    <p>Listen to the played sample, then identify the chroma by clicking a button or playing the matching note on your MIDI keyboard.</p>
-  </header>
-
-  <main>
-    <section class="status">
-      <div class="status-row">
-        <div id="midi-status" class="pill muted">MIDI: detecting…</div>
-      </div>
-    </section>
-
-    <section class="controls" aria-label="Chromas">
-      <div class="controls-row">
-        <label for="chroma-set-select">Chroma set</label>
-        <select id="chroma-set-select"></select>
-      </div>
-      <div id="chroma-buttons" class="buttons"></div>
-    </section>
-  </main>
-
+  <main id="app"></main>
   <script src="script.js"></script>
 </body>
 </html>
