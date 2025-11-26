@@ -163,18 +163,6 @@ button.chroma.incorrect {
   color: var(--error);
 }
 
-@media (hover: none) and (pointer: coarse) {
-  #start-button:hover {
-    box-shadow: none;
-    background: linear-gradient(145deg, rgba(88, 166, 255, 0.2), rgba(88, 166, 255, 0.35));
-  }
-
-  button.chroma:hover {
-    background: #1f2937;
-    border-color: var(--border);
-  }
-}
-
 @media (max-width: 480px) {
   body {
     padding: 12px;

@@ -153,6 +153,13 @@ function resetButtonStates() {
   });
 }
 
+function resetButtonFocus() {
+  const activeElement = document.activeElement;
+  if (activeElement && typeof activeElement.blur === "function") {
+    activeElement.blur();
+  }
+}
+
 function resetTrialState() {
   cancelNextTrialTimeout();
   fadeOutCurrentAudio();
@@ -279,6 +286,7 @@ async function startTrial(attempt = 0) {
   const MAX_ATTEMPTS = 30;
 
   cancelNextTrialTimeout();
+  resetButtonFocus();
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
