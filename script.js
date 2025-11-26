@@ -1,3 +1,10 @@
+const midiRange = { min: 36, max: 96 };
+const CORRECT_FEEDBACK_DURATION = 400;
+const INCORRECT_FEEDBACK_DURATION = 1500;
+const NEXT_TRIAL_DELAY = 0;
+const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
+
+
 const chromas = [
   { label: "C", index: 0 },
   { label: "C♯", index: 1 },
@@ -84,11 +91,6 @@ const instrumentRanges = {
   Violins: { min: 55, max: 96 },
 };
 
-const midiRange = { min: 36, max: 96 };
-const CORRECT_FEEDBACK_DURATION = 800;
-const INCORRECT_FEEDBACK_DURATION = 1500;
-const NEXT_TRIAL_DELAY = 50;
-const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
 
 const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
