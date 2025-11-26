@@ -308,8 +308,8 @@ function fadeOutCurrentAudio() {
   console.log("startvolume",startVolume);
   const startTime = performance.now();
 
-  function step(now) {
-    const elapsed = now - startTime;
+  function step() {
+    const elapsed = performance.now() - startTime;
     const progress = Math.min(elapsed / fadeDurationMs, 1);
     audio.volume = Math.max(startVolume * (1 - progress), 0);
 
