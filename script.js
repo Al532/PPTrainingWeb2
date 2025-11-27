@@ -4,8 +4,6 @@ const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
 const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
 const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
-const TRIAL_LOG_PENDING_KEY = "ppt-trial-log-pending";
-const TRIAL_LOG_USER_KEY = "ppt-user-token";
 const FADE_DURATION_MS = 100;
 const RECENT_ENTRIES = 1000;
 
@@ -134,143 +132,28 @@ let fadeTimeout = null;
 let statsPanelOpen = false;
 let trialLog = [];
 let nextTrialNumber = 1;
-let userToken = getOrCreateUserToken();
-let pendingEntries = loadPendingEntries();
 
-function getOrCreateUserToken() {
-  const existing = localStorage.getItem(TRIAL_LOG_USER_KEY);
-  if (existing) return existing;
-
-  const token = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
-  try {
-    localStorage.setItem(TRIAL_LOG_USER_KEY, token);
-  } catch (error) {
-    // Ignore storage errors and return the in-memory token.
-  }
-  return token;
-}
-
-function loadLocalEntries() {
+function loadTrialLog() {
   try {
     const serialized = localStorage.getItem(TRIAL_LOG_STORAGE_KEY);
-    if (!serialized) return [];
+    if (!serialized) return;
 
     const parsed = JSON.parse(serialized);
     if (Array.isArray(parsed)) {
-      return parsed.filter((entry) => typeof entry === "object" && entry !== null);
+      trialLog = parsed.filter((entry) => typeof entry === "object" && entry !== null);
+      const highestTrialNumber = trialLog.reduce((max, entry) => {
+        const number = Number(entry.trialNumber);
+        return Number.isFinite(number) ? Math.max(max, number) : max;
+      }, 0);
+      nextTrialNumber = highestTrialNumber + 1;
     }
   } catch (error) {
-    // Ignore parsing errors and fall back to an empty list.
-  }
-  return [];
-}
-
-function loadPendingEntries() {
-  try {
-    const serialized = localStorage.getItem(TRIAL_LOG_PENDING_KEY);
-    if (!serialized) return [];
-    const parsed = JSON.parse(serialized);
-    if (Array.isArray(parsed)) {
-      return parsed.filter((entry) => typeof entry === "object" && entry !== null);
-    }
-  } catch (error) {
-    // Ignore pending log errors and start with an empty queue.
-  }
-  return [];
-}
-
-function persistPendingEntries() {
-  try {
-    localStorage.setItem(TRIAL_LOG_PENDING_KEY, JSON.stringify(pendingEntries));
-  } catch (error) {
-    // Ignore storage errors; queued entries remain in memory.
+    trialLog = [];
+    nextTrialNumber = 1;
   }
 }
 
-function mergeEntries(...entryLists) {
-  const merged = [];
-  const seen = new Set();
-
-  entryLists
-    .filter((list) => Array.isArray(list))
-    .forEach((list) => {
-      list.forEach((entry) => {
-        if (typeof entry !== "object" || entry === null) return;
-        const key = entry.trialNumber != null ? `trial-${entry.trialNumber}` : JSON.stringify(entry);
-        if (seen.has(key)) return;
-        seen.add(key);
-        merged.push(entry);
-      });
-    });
-
-  return merged.sort((a, b) => {
-    const aNum = Number(a.trialNumber);
-    const bNum = Number(b.trialNumber);
-    if (Number.isFinite(aNum) && Number.isFinite(bNum)) {
-      return aNum - bNum;
-    }
-    if (Number.isFinite(aNum)) return -1;
-    if (Number.isFinite(bNum)) return 1;
-    return 0;
-  });
-}
-
-function refreshTrialNumber() {
-  const highestTrialNumber = trialLog.reduce((max, entry) => {
-    const number = Number(entry.trialNumber);
-    return Number.isFinite(number) ? Math.max(max, number) : max;
-  }, 0);
-  nextTrialNumber = highestTrialNumber + 1;
-}
-
-function queuePendingEntries() {
-  pendingEntries = mergeEntries(pendingEntries, trialLog.slice(-1));
-  persistPendingEntries();
-}
-
-async function syncPendingLog() {
-  if (!window.logApi || !pendingEntries.length || navigator.onLine === false) {
-    return;
-  }
-
-  try {
-    await window.logApi.appendEntries(userToken, pendingEntries);
-    pendingEntries = [];
-    persistPendingEntries();
-  } catch (error) {
-    // Keep pending entries for a later retry.
-  }
-}
-
-async function loadTrialLog() {
-  const localEntries = loadLocalEntries();
-  trialLog = mergeEntries(localEntries, pendingEntries);
-  refreshTrialNumber();
-
-  if (!window.logApi) return;
-
-  try {
-    const remoteEntries = await window.logApi.fetchEntries(userToken);
-    if (Array.isArray(remoteEntries)) {
-      const remoteTrialNumbers = new Set(
-        remoteEntries
-          .map((entry) => Number(entry?.trialNumber))
-          .filter((value) => Number.isFinite(value))
-      );
-      pendingEntries = pendingEntries.filter(
-        (entry) => !remoteTrialNumbers.has(Number(entry?.trialNumber))
-      );
-      trialLog = mergeEntries(remoteEntries, pendingEntries, localEntries);
-      refreshTrialNumber();
-      persistLocalLog();
-      await syncPendingLog();
-    }
-  } catch (error) {
-    // Fall back to local entries when the remote API is unavailable.
-  }
-}
-
-function persistLocalLog() {
+function persistTrialLog() {
   try {
     localStorage.setItem(TRIAL_LOG_STORAGE_KEY, JSON.stringify(trialLog));
   } catch (error) {
@@ -278,14 +161,8 @@ function persistLocalLog() {
   }
 }
 
-async function persistTrialLog() {
-  persistLocalLog();
-  queuePendingEntries();
-  await syncPendingLog();
-}
-
 function logTrialResult(entry) {
-  const logEntry = { ...entry, trialNumber: nextTrialNumber, userToken };
+  const logEntry = { ...entry, trialNumber: nextTrialNumber };
   trialLog.push(logEntry);
   nextTrialNumber += 1;
   persistTrialLog();
@@ -877,8 +754,8 @@ function handleMidiMessage(message) {
   handleAnswer(chromaIndex);
 }
 
-async function init() {
-  await loadTrialLog();
+function init() {
+  loadTrialLog();
   populateChromaSetSelect();
   showStartButton();
   setupMidi();
@@ -889,10 +766,6 @@ async function init() {
     statsOutput.textContent = "Select a chroma set to view stats.";
     statsOutput.hidden = true;
   }
-
-  window.addEventListener("online", () => {
-    syncPendingLog();
-  });
 }
 
 document.addEventListener("DOMContentLoaded", init);
