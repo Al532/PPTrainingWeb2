@@ -97,6 +97,8 @@ const instrumentRanges = {
 const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
 const chromaSetSelect = document.getElementById("chroma-set-select");
+const statsButton = document.getElementById("stats-button");
+const statsOutput = document.getElementById("stats-output");
 
 const notesByChroma = buildNotesByChroma();
 const availabilityCache = new Map();
@@ -155,6 +157,39 @@ function logTrialResult(entry) {
   trialLog.push(logEntry);
   nextTrialNumber += 1;
   persistTrialLog();
+}
+
+function calculateAccuracy(entries) {
+  if (!entries.length) return null;
+
+  const correctCount = entries.reduce(
+    (count, entry) => (entry?.isCorrect ? count + 1 : count),
+    0
+  );
+  return Math.round((correctCount / entries.length) * 100);
+}
+
+function renderStats() {
+  if (!statsOutput) return;
+
+  const totalTrials = trialLog.length;
+  if (!totalTrials) {
+    statsOutput.textContent = "No trials recorded yet.";
+    return;
+  }
+
+  const overallAccuracy = calculateAccuracy(trialLog);
+  const recentEntries = trialLog.slice(-100);
+  const recentAccuracy = calculateAccuracy(recentEntries);
+  const recentLabel = recentEntries.length === 100
+    ? "Last 100 trials accuracy"
+    : `Last ${recentEntries.length} trial${recentEntries.length === 1 ? "" : "s"} accuracy`;
+
+  statsOutput.innerHTML = `
+    <p>Total trials: ${totalTrials}</p>
+    <p>Overall accuracy: ${overallAccuracy ?? 0}%</p>
+    <p>${recentLabel}: ${recentAccuracy ?? 0}%</p>
+  `;
 }
 
 function getChromaLabelByIndex(chromaIndex) {
@@ -651,6 +686,12 @@ function init() {
   populateChromaSetSelect();
   showStartButton();
   setupMidi();
+  if (statsButton) {
+    statsButton.addEventListener("click", renderStats);
+  }
+  if (statsOutput) {
+    statsOutput.textContent = "Click \"Show stats\" to view your results.";
+  }
 }
 
 document.addEventListener("DOMContentLoaded", init);
