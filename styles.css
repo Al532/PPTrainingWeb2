@@ -101,6 +101,72 @@ main {
   gap: 12px;
 }
 
+.stats {
+  margin-top: 28px;
+}
+
+.stats-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.stats-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #1f2937;
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 700;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.stats-toggle:hover {
+  border-color: var(--accent);
+  background: #22304a;
+}
+
+.stats-toggle .chevron {
+  display: inline-block;
+  font-size: 1.2rem;
+  line-height: 1;
+  transform: rotate(-90deg);
+  transition: transform 150ms ease;
+}
+
+.stats-toggle.open .chevron {
+  transform: rotate(90deg);
+}
+
+.stats-output {
+  flex: 1;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.stats-output[hidden] {
+  display: none;
+}
+
+.stats-heading {
+  font-weight: 800;
+  margin: 0 0 6px;
+}
+
+.stats-block p {
+  margin: 4px 0;
+}
+
+.muted {
+  color: var(--muted);
+}
+
 #start-button {
   padding: 22px 16px;
   border-radius: 14px;
