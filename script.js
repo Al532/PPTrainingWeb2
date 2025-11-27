@@ -96,6 +96,9 @@ const instrumentRanges = {
 const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
 const chromaSetSelect = document.getElementById("chroma-set-select");
+const statsToggle = document.getElementById("stats-toggle");
+const statsPanel = document.getElementById("stats-panel");
+const statsContent = document.getElementById("stats-content");
 
 const trialsLog = [];
 const MAX_TRIAL_LOG_LENGTH = 200;
@@ -190,6 +193,62 @@ function resetButtonFocus() {
   const activeElement = document.activeElement;
   if (activeElement && typeof activeElement.blur === "function") {
     activeElement.blur();
+  }
+}
+
+function setupStatsToggle() {
+  if (!statsToggle || !statsPanel) return;
+
+  statsToggle.addEventListener("click", () => {
+    const shouldShow = statsPanel.hasAttribute("hidden");
+
+    if (shouldShow) {
+      renderStats();
+      statsPanel.removeAttribute("hidden");
+      statsToggle.textContent = "Hide stats";
+    } else {
+      statsPanel.setAttribute("hidden", "");
+      statsToggle.textContent = "Show stats";
+    }
+  });
+}
+
+function formatPercentage(numerator, denominator) {
+  if (!denominator) return "0%";
+  const value = ((numerator / denominator) * 100).toFixed(1);
+  return `${value}%`;
+}
+
+function renderStats() {
+  if (!statsContent) return;
+
+  const completedTrials = trialsLog.filter((entry) => entry.correct !== null);
+
+  if (!completedTrials.length) {
+    statsContent.textContent = "No trials logged yet. Play a round to see your stats.";
+    statsContent.classList.add("muted");
+    return;
+  }
+
+  const totalTrials = completedTrials.length;
+  const totalCorrect = completedTrials.filter((entry) => entry.correct).length;
+  const recentTrials = completedTrials.slice(-100);
+  const recentCorrect = recentTrials.filter((entry) => entry.correct).length;
+
+  statsContent.classList.remove("muted");
+  statsContent.innerHTML = `
+    <p>Total trials recorded: <strong>${totalTrials}</strong>.</p>
+    <p>Overall accuracy: <strong>${formatPercentage(totalCorrect, totalTrials)}</strong>.</p>
+    <p>Accuracy over the last ${recentTrials.length} trials: <strong>${formatPercentage(
+      recentCorrect,
+      recentTrials.length
+    )}</strong>.</p>
+  `;
+}
+
+function refreshStatsPanelIfVisible() {
+  if (statsPanel && !statsPanel.hasAttribute("hidden")) {
+    renderStats();
   }
 }
 
@@ -598,6 +657,7 @@ function handleMidiMessage(message) {
 function init() {
   populateChromaSetSelect();
   showStartButton();
+  setupStatsToggle();
   setupMidi();
 }
 
@@ -622,6 +682,7 @@ function logTrialStart(trial) {
   }
 
   currentTrialLogEntry = entry;
+  refreshStatsPanelIfVisible();
 }
 
 function finalizeTrialLog(chosenChroma, isCorrect) {
@@ -633,6 +694,7 @@ function finalizeTrialLog(chosenChroma, isCorrect) {
   entry.userChroma = getChromaLabel(chosenChroma);
   entry.correct = isCorrect;
   currentTrialLogEntry = null;
+  refreshStatsPanelIfVisible();
 }
 
 document.addEventListener("DOMContentLoaded", init);

@@ -70,6 +70,10 @@ main {
   background: rgba(139, 148, 158, 0.1);
 }
 
+.muted {
+  color: var(--muted);
+}
+
 .controls {
   margin-top: 20px;
 }
@@ -149,6 +153,30 @@ button.chroma:active {
 button.chroma:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.stats {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#stats-toggle {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.stats-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #1a202c;
+  padding: 14px 16px;
+  line-height: 1.5;
+}
+
+.stats-panel strong {
+  color: var(--accent);
 }
 
 button.chroma.correct {
