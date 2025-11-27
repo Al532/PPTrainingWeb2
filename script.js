@@ -47,24 +47,30 @@ const chromaLookup = {
 };
 
 const chromaSets = [
-  { name: "Tritones 1", notes: ["C", "F♯"] },
-  { name: "Tritones 2", notes: ["C♯", "G"] },
-  { name: "Tritones 3", notes: ["D", "A♭"] },
-  { name: "Tritones 4", notes: ["E♭", "A"] },
-  { name: "Tritones 5", notes: ["E", "B♭"] },
-  { name: "Tritones 6", notes: ["F", "B"] },
-  { name: "Thirds 1", notes: ["C", "E", "A♭"] },
-  { name: "Thirds 2", notes: ["C♯", "F", "A"] },
-  { name: "Thirds 3", notes: ["D", "F♯", "B♭"] },
-  { name: "Thirds 4", notes: ["E♭", "G", "B"] },
-  { name: "Minor thirds 1", notes: ["C", "E♭", "F♯", "A"] },
-  { name: "Minor thirds 2", notes: ["C♯", "E", "G", "B♭"] },
-  { name: "Minor thirds 3", notes: ["D", "F", "A♭", "B"] },
-  { name: "Tones 1", notes: ["C", "D", "E", "F♯", "A♭", "B♭"] },
-  { name: "Tones 2", notes: ["C♯", "E♭", "F", "G", "A", "B"] },
+  { name: "Tritones 1", exerciseType: "Tritones", notes: ["C", "F♯"] },
+  { name: "Tritones 2", exerciseType: "Tritones", notes: ["C♯", "G"] },
+  { name: "Tritones 3", exerciseType: "Tritones", notes: ["D", "A♭"] },
+  { name: "Tritones 4", exerciseType: "Tritones", notes: ["E♭", "A"] },
+  { name: "Tritones 5", exerciseType: "Tritones", notes: ["E", "B♭"] },
+  { name: "Tritones 6", exerciseType: "Tritones", notes: ["F", "B"] },
+  { name: "Thirds 1", exerciseType: "Thirds", notes: ["C", "E", "A♭"] },
+  { name: "Thirds 2", exerciseType: "Thirds", notes: ["C♯", "F", "A"] },
+  { name: "Thirds 3", exerciseType: "Thirds", notes: ["D", "F♯", "B♭"] },
+  { name: "Thirds 4", exerciseType: "Thirds", notes: ["E♭", "G", "B"] },
+  { name: "Minor thirds 1", exerciseType: "Minor thirds", notes: ["C", "E♭", "F♯", "A"] },
+  { name: "Minor thirds 2", exerciseType: "Minor thirds", notes: ["C♯", "E", "G", "B♭"] },
+  { name: "Minor thirds 3", exerciseType: "Minor thirds", notes: ["D", "F", "A♭", "B"] },
+  { name: "Tones 1", exerciseType: "Tones", notes: ["C", "D", "E", "F♯", "A♭", "B♭"] },
+  { name: "Tones 2", exerciseType: "Tones", notes: ["C♯", "E♭", "F", "G", "A", "B"] },
+  {
+    name: "Chromatic",
+    exerciseType: "Chromatic",
+    notes: chromas.map((chroma) => chroma.label),
+  },
 ].map((set) => ({
   label: `${set.name}: ${set.notes.join(", ")}`,
   chromas: set.notes.map((note) => ({ label: note, index: chromaLookup[note] })),
+  exerciseType: set.exerciseType,
 }));
 
 const instruments = [
@@ -108,6 +114,7 @@ let currentState = {
   midiNote: null,
   instrument: null,
   chromaSetLabel: "",
+  exerciseType: "",
   awaitingGuess: false,
 };
 let feedbackResetTimeout = null;
@@ -121,6 +128,7 @@ let pendingTrial = null;
 let pendingPreparationPromise = null;
 let pendingPreparationToken = 0;
 let fadeTimeout = null;
+let statsPanelOpen = false;
 let trialLog = [];
 let nextTrialNumber = 1;
 
@@ -169,27 +177,85 @@ function calculateAccuracy(entries) {
   return Math.round((correctCount / entries.length) * 100);
 }
 
+function getExerciseTypeFromLabel(label = "") {
+  const knownTypes = [
+    "Tritones",
+    "Thirds",
+    "Minor thirds",
+    "Tones",
+    "Chromatic",
+  ];
+
+  const trimmedLabel = label.trim();
+  return knownTypes.find((type) => trimmedLabel.startsWith(type)) ?? "";
+}
+
+function getCurrentExerciseType() {
+  return (
+    activeChromaSet?.exerciseType || getExerciseTypeFromLabel(activeChromaSet?.label)
+  );
+}
+
+function getTrialsForExercise(exerciseType) {
+  if (!exerciseType) return [];
+
+  return trialLog.filter((entry) => {
+    const entryType = entry.exerciseType || getExerciseTypeFromLabel(entry.chromaSetLabel);
+    return entryType === exerciseType;
+  });
+}
+
 function renderStats() {
   if (!statsOutput) return;
 
-  const totalTrials = trialLog.length;
-  if (!totalTrials) {
-    statsOutput.textContent = "No trials recorded yet.";
+  const exerciseType = getCurrentExerciseType();
+  if (!exerciseType) {
+    statsOutput.textContent = "Select a chroma set to view stats.";
     return;
   }
 
-  const overallAccuracy = calculateAccuracy(trialLog);
-  const recentEntries = trialLog.slice(-100);
-  const recentAccuracy = calculateAccuracy(recentEntries);
-  const recentLabel = recentEntries.length === 100
-    ? "Last 100 trials accuracy"
-    : `Last ${recentEntries.length} trial${recentEntries.length === 1 ? "" : "s"} accuracy`;
+  const entries = getTrialsForExercise(exerciseType);
+  const totalTrials = entries.length;
+  const overallAccuracy = calculateAccuracy(entries);
+  const last150Entries = entries.slice(-150);
+  const last150Accuracy =
+    last150Entries.length === 150 ? calculateAccuracy(last150Entries) : null;
+
+  const overallDisplay = overallAccuracy == null ? "-" : `${overallAccuracy}%`;
+  const last150Display = last150Accuracy == null ? "-" : `${last150Accuracy}%`;
 
   statsOutput.innerHTML = `
-    <p>Total trials: ${totalTrials}</p>
-    <p>Overall accuracy: ${overallAccuracy ?? 0}%</p>
-    <p>${recentLabel}: ${recentAccuracy ?? 0}%</p>
+    <div class="stats-block">
+      <div class="stats-heading">${exerciseType}</div>
+      <p><span class="muted">Total trials:</span> ${totalTrials}</p>
+      <p><span class="muted">Overall accuracy:</span> ${overallDisplay}</p>
+      <p><span class="muted">Last 150 trials accuracy:</span> ${last150Display}</p>
+    </div>
   `;
+}
+
+function refreshStatsIfOpen() {
+  if (statsPanelOpen) {
+    renderStats();
+  }
+}
+
+function setStatsPanelOpen(isOpen) {
+  statsPanelOpen = isOpen;
+  if (statsButton) {
+    statsButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    statsButton.classList.toggle("open", isOpen);
+  }
+  if (statsOutput) {
+    statsOutput.hidden = !isOpen;
+  }
+  if (isOpen) {
+    renderStats();
+  }
+}
+
+function toggleStatsPanel() {
+  setStatsPanelOpen(!statsPanelOpen);
 }
 
 function getChromaLabelByIndex(chromaIndex) {
@@ -281,6 +347,7 @@ function resetTrialState() {
     midiNote: null,
     instrument: null,
     chromaSetLabel: "",
+    exerciseType: "",
     awaitingGuess: false,
   };
   clearPendingTrial();
@@ -323,6 +390,7 @@ function handleChromaSetChange(event) {
   activeChromaSet = selectedSet;
   saveChromaSetSelection(selectedIndex);
   showStartButton();
+  refreshStatsIfOpen();
 }
 
 function loadSavedChromaSetIndex() {
@@ -425,6 +493,7 @@ async function startTrial(attempt = 0) {
     midiNote: trial.midiNote,
     instrument: trial.instrument,
     chromaSetLabel: activeChromaSet?.label ?? "",
+    exerciseType: activeChromaSet?.exerciseType ?? "",
     awaitingGuess: true,
   };
   lastMidiNotePlayed = trial.midiNote;
@@ -534,8 +603,11 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     midiNote: currentState.midiNote,
     instrument: currentState.instrument,
     userSelectedChroma: getChromaLabelByIndex(chosenChroma),
+    exerciseType: currentState.exerciseType || getCurrentExerciseType(),
     isCorrect,
   });
+
+  refreshStatsIfOpen();
 
   if (isCorrect) {
     chosenButton?.classList.add("correct");
@@ -687,10 +759,11 @@ function init() {
   showStartButton();
   setupMidi();
   if (statsButton) {
-    statsButton.addEventListener("click", renderStats);
+    statsButton.addEventListener("click", toggleStatsPanel);
   }
   if (statsOutput) {
-    statsOutput.textContent = "Click \"Show stats\" to view your results.";
+    statsOutput.textContent = "Select a chroma set to view stats.";
+    statsOutput.hidden = true;
   }
 }
 

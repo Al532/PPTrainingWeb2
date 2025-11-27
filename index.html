@@ -30,8 +30,17 @@
 
     <section class="stats" aria-label="Session stats">
       <div class="stats-row">
-        <button type="button" id="stats-button">Show stats</button>
-        <div id="stats-output" aria-live="polite"></div>
+        <button
+          type="button"
+          id="stats-button"
+          class="stats-toggle"
+          aria-expanded="false"
+          aria-controls="stats-output"
+        >
+          <span class="chevron" aria-hidden="true">‹</span>
+          <span class="label">Stats</span>
+        </button>
+        <div id="stats-output" class="stats-output" aria-live="polite"></div>
       </div>
     </section>
   </main>
