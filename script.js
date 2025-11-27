@@ -97,6 +97,11 @@ const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
 const chromaSetSelect = document.getElementById("chroma-set-select");
 
+const trialsLog = [];
+const MAX_TRIAL_LOG_LENGTH = 200;
+let trialCounter = 0;
+let currentTrialLogEntry = null;
+
 const notesByChroma = buildNotesByChroma();
 const availabilityCache = new Map();
 let activeChromaSet = chromaSets[0];
@@ -104,6 +109,7 @@ let currentState = {
   chromaIndex: null,
   midiNote: null,
   awaitingGuess: false,
+  trialIndex: null,
 };
 let feedbackResetTimeout = null;
 let currentAudio = null;
@@ -197,7 +203,7 @@ function resetTrialState() {
     feedbackResetTimeout = null;
   }
   resetButtonStates();
-  currentState = { chromaIndex: null, midiNote: null, awaitingGuess: false };
+  currentState = { chromaIndex: null, midiNote: null, awaitingGuess: false, trialIndex: null };
   clearPendingTrial();
 }
 
@@ -339,8 +345,10 @@ async function startTrial(attempt = 0) {
     chromaIndex: trial.chromaIndex,
     midiNote: trial.midiNote,
     awaitingGuess: true,
+    trialIndex: ++trialCounter,
   };
   lastMidiNotePlayed = trial.midiNote;
+  logTrialStart(trial);
   playPreparedTrial(trial);
   preparePendingTrial();
 }
@@ -451,6 +459,8 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
   const feedbackDuration = isCorrect
     ? CORRECT_FEEDBACK_DURATION
     : INCORRECT_FEEDBACK_DURATION;
+
+  finalizeTrialLog(chosenChroma, isCorrect);
 
   if (shouldFadeOut) {
     scheduleAudioFade(feedbackDuration);
@@ -589,6 +599,40 @@ function init() {
   populateChromaSetSelect();
   showStartButton();
   setupMidi();
+}
+
+function getChromaLabel(index) {
+  return chromas.find((chroma) => chroma.index === index)?.label ?? String(index);
+}
+
+function logTrialStart(trial) {
+  const entry = {
+    trialIndex: currentState.trialIndex,
+    exerciseLabel: activeChromaSet?.label ?? "",
+    targetChroma: getChromaLabel(trial.chromaIndex),
+    midiNote: trial.midiNote,
+    instrument: trial.instrument,
+    userChroma: null,
+    correct: null,
+  };
+
+  trialsLog.push(entry);
+  if (trialsLog.length > MAX_TRIAL_LOG_LENGTH) {
+    trialsLog.shift();
+  }
+
+  currentTrialLogEntry = entry;
+}
+
+function finalizeTrialLog(chosenChroma, isCorrect) {
+  const entry =
+    trialsLog.find((logEntry) => logEntry.trialIndex === currentState.trialIndex) ||
+    currentTrialLogEntry;
+  if (!entry) return;
+
+  entry.userChroma = getChromaLabel(chosenChroma);
+  entry.correct = isCorrect;
+  currentTrialLogEntry = null;
 }
 
 document.addEventListener("DOMContentLoaded", init);
