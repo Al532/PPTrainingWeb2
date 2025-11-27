@@ -5,6 +5,7 @@ const NEXT_TRIAL_DELAY = 0;
 const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
 const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
 const FADE_DURATION_MS = 100;
+const RECENT_ENTRIES = 1000;
 
 
 const chromas = [
@@ -217,19 +218,19 @@ function renderStats() {
   const entries = getTrialsForExercise(exerciseType);
   const totalTrials = entries.length;
   const overallAccuracy = calculateAccuracy(entries);
-  const last150Entries = entries.slice(-150);
-  const last150Accuracy =
-    last150Entries.length === 150 ? calculateAccuracy(last150Entries) : null;
+  const recentEntries = entries.slice(-RECENT_ENTRIES);
+  const recentAccuracy =
+    recentEntries.length === RECENT_ENTRIES ? calculateAccuracy(recentEntries) : null;
 
   const overallDisplay = overallAccuracy == null ? "-" : `${overallAccuracy}%`;
-  const last150Display = last150Accuracy == null ? "-" : `${last150Accuracy}%`;
+  const recentDisplay = recentAccuracy == null ? "-" : `${recentAccuracy}%`;
 
   statsOutput.innerHTML = `
     <div class="stats-block">
       <div class="stats-heading">${exerciseType}</div>
       <p><span class="muted">Total trials:</span> ${totalTrials}</p>
       <p><span class="muted">Overall accuracy:</span> ${overallDisplay}</p>
-      <p><span class="muted">Last 150 trials accuracy:</span> ${last150Display}</p>
+      <p><span class="muted">Last 1000 trials accuracy:</span> ${recentDisplay}</p>
     </div>
   `;
 }
