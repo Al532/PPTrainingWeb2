@@ -3,6 +3,7 @@ const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
 const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
+const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
 const FADE_DURATION_MS = 100;
 
 
@@ -103,6 +104,8 @@ let activeChromaSet = chromaSets[0];
 let currentState = {
   chromaIndex: null,
   midiNote: null,
+  instrument: null,
+  chromaSetLabel: "",
   awaitingGuess: false,
 };
 let feedbackResetTimeout = null;
@@ -116,6 +119,47 @@ let pendingTrial = null;
 let pendingPreparationPromise = null;
 let pendingPreparationToken = 0;
 let fadeTimeout = null;
+let trialLog = [];
+let nextTrialNumber = 1;
+
+function loadTrialLog() {
+  try {
+    const serialized = localStorage.getItem(TRIAL_LOG_STORAGE_KEY);
+    if (!serialized) return;
+
+    const parsed = JSON.parse(serialized);
+    if (Array.isArray(parsed)) {
+      trialLog = parsed.filter((entry) => typeof entry === "object" && entry !== null);
+      const highestTrialNumber = trialLog.reduce((max, entry) => {
+        const number = Number(entry.trialNumber);
+        return Number.isFinite(number) ? Math.max(max, number) : max;
+      }, 0);
+      nextTrialNumber = highestTrialNumber + 1;
+    }
+  } catch (error) {
+    trialLog = [];
+    nextTrialNumber = 1;
+  }
+}
+
+function persistTrialLog() {
+  try {
+    localStorage.setItem(TRIAL_LOG_STORAGE_KEY, JSON.stringify(trialLog));
+  } catch (error) {
+    // Ignore storage errors to avoid disrupting the session.
+  }
+}
+
+function logTrialResult(entry) {
+  const logEntry = { ...entry, trialNumber: nextTrialNumber };
+  trialLog.push(logEntry);
+  nextTrialNumber += 1;
+  persistTrialLog();
+}
+
+function getChromaLabelByIndex(chromaIndex) {
+  return chromas.find((chroma) => chroma.index === chromaIndex)?.label ?? String(chromaIndex);
+}
 
 function getAudioContext() {
   if (!AudioContextClass) return null;
@@ -197,7 +241,13 @@ function resetTrialState() {
     feedbackResetTimeout = null;
   }
   resetButtonStates();
-  currentState = { chromaIndex: null, midiNote: null, awaitingGuess: false };
+  currentState = {
+    chromaIndex: null,
+    midiNote: null,
+    instrument: null,
+    chromaSetLabel: "",
+    awaitingGuess: false,
+  };
   clearPendingTrial();
 }
 
@@ -338,6 +388,8 @@ async function startTrial(attempt = 0) {
   currentState = {
     chromaIndex: trial.chromaIndex,
     midiNote: trial.midiNote,
+    instrument: trial.instrument,
+    chromaSetLabel: activeChromaSet?.label ?? "",
     awaitingGuess: true,
   };
   lastMidiNotePlayed = trial.midiNote;
@@ -440,6 +492,15 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
   const isCorrect = chosenChroma === currentState.chromaIndex;
   const chosenButton = getChromaButton(chosenChroma);
   const correctButton = getChromaButton(currentState.chromaIndex);
+
+  logTrialResult({
+    chromaSetLabel: currentState.chromaSetLabel,
+    targetChromaLabel: getChromaLabelByIndex(currentState.chromaIndex),
+    midiNote: currentState.midiNote,
+    instrument: currentState.instrument,
+    userSelectedChroma: getChromaLabelByIndex(chosenChroma),
+    isCorrect,
+  });
 
   if (isCorrect) {
     chosenButton?.classList.add("correct");
@@ -586,6 +647,7 @@ function handleMidiMessage(message) {
 }
 
 function init() {
+  loadTrialLog();
   populateChromaSetSelect();
   showStartButton();
   setupMidi();
