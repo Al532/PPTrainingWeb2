@@ -159,6 +159,10 @@ main {
   margin: 0 0 6px;
 }
 
+.stats-block + .stats-block {
+  margin-top: 12px;
+}
+
 .stats-block p {
   margin: 4px 0;
 }

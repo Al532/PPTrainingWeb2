@@ -133,6 +133,14 @@ let statsPanelOpen = false;
 let trialLog = [];
 let nextTrialNumber = 1;
 
+function formatTrialDate(date) {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+
+  return `${day}/${month}/${year}`;
+}
+
 function loadTrialLog() {
   try {
     const serialized = localStorage.getItem(TRIAL_LOG_STORAGE_KEY);
@@ -162,7 +170,8 @@ function persistTrialLog() {
 }
 
 function logTrialResult(entry) {
-  const logEntry = { ...entry, trialNumber: nextTrialNumber };
+  const trialDate = formatTrialDate(new Date());
+  const logEntry = { ...entry, trialNumber: nextTrialNumber, trialDate };
   trialLog.push(logEntry);
   nextTrialNumber += 1;
   persistTrialLog();
@@ -209,14 +218,28 @@ function getTrialsForExercise(exerciseType) {
 function renderStats() {
   if (!statsOutput) return;
 
+  const totalTrials = trialLog.length;
+  const todayString = formatTrialDate(new Date());
+  const totalTrialsToday = trialLog.reduce(
+    (count, entry) => (entry?.trialDate === todayString ? count + 1 : count),
+    0
+  );
+
   const exerciseType = getCurrentExerciseType();
   if (!exerciseType) {
-    statsOutput.textContent = "Select a chroma set to view stats.";
+    statsOutput.innerHTML = `
+      <div class="stats-block">
+        <div class="stats-heading">Overview</div>
+        <p><span class="muted">Total trials:</span> ${totalTrials}</p>
+        <p><span class="muted">Total trials today:</span> ${totalTrialsToday}</p>
+      </div>
+      <p class="muted">Select a chroma set to view stats.</p>
+    `;
     return;
   }
 
   const entries = getTrialsForExercise(exerciseType);
-  const totalTrials = entries.length;
+  const totalExerciseTrials = entries.length;
   const overallAccuracy = calculateAccuracy(entries);
   const recentEntries = entries.slice(-RECENT_ENTRIES);
   const recentAccuracy =
@@ -227,8 +250,13 @@ function renderStats() {
 
   statsOutput.innerHTML = `
     <div class="stats-block">
-      <div class="stats-heading">${exerciseType}</div>
+      <div class="stats-heading">Overview</div>
       <p><span class="muted">Total trials:</span> ${totalTrials}</p>
+      <p><span class="muted">Total trials today:</span> ${totalTrialsToday}</p>
+    </div>
+    <div class="stats-block">
+      <div class="stats-heading">${exerciseType}</div>
+      <p><span class="muted">Total trials:</span> ${totalExerciseTrials}</p>
       <p><span class="muted">Overall accuracy:</span> ${overallDisplay}</p>
       <p><span class="muted">Last 1000 trials accuracy:</span> ${recentDisplay}</p>
     </div>
