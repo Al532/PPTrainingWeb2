@@ -1,4 +1,4 @@
-const midiRange = { min: 36, max: 96 };
+const BASE_MIDI_RANGE = { min: 36, max: 96 };
 const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
@@ -107,8 +107,11 @@ const midiStatusEl = document.getElementById("midi-status");
 const chromaSetSelect = document.getElementById("chroma-set-select");
 const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
+const reducedRangeToggle = document.getElementById("reduced-range-toggle");
 
-const notesByChroma = buildNotesByChroma();
+let midiRange = { ...BASE_MIDI_RANGE };
+let reducedRangeEnabled = false;
+let notesByChroma = buildNotesByChroma();
 const availabilityCache = new Map();
 let activeChromaSet = chromaSets[0];
 let currentState = {
@@ -308,12 +311,41 @@ function getAudioContext() {
   return audioContext;
 }
 
-function buildNotesByChroma() {
+function buildNotesByChroma(range = midiRange) {
   const buckets = Array.from({ length: 12 }, () => []);
-  for (let note = midiRange.min; note <= midiRange.max; note += 1) {
+  for (let note = range.min; note <= range.max; note += 1) {
     buckets[note % 12].push(note);
   }
   return buckets;
+}
+
+function getRangeForSetting(isReduced) {
+  if (!isReduced) {
+    return { ...BASE_MIDI_RANGE };
+  }
+
+  return {
+    min: BASE_MIDI_RANGE.min + 12,
+    max: BASE_MIDI_RANGE.max - 12,
+  };
+}
+
+function applyRangeSetting(isReduced) {
+  reducedRangeEnabled = Boolean(isReduced);
+  midiRange = getRangeForSetting(reducedRangeEnabled);
+  notesByChroma = buildNotesByChroma(midiRange);
+  lastMidiNotePlayed = null;
+  showStartButton();
+  refreshStatsIfOpen();
+}
+
+function setupReducedRangeToggle() {
+  if (!reducedRangeToggle) return;
+
+  reducedRangeToggle.checked = reducedRangeEnabled;
+  reducedRangeToggle.addEventListener("change", (event) => {
+    applyRangeSetting(event.target?.checked);
+  });
 }
 
 function createButtons() {
@@ -643,6 +675,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     instrument: currentState.instrument,
     userSelectedChroma: getChromaLabelByIndex(chosenChroma),
     exerciseType: currentState.exerciseType || getCurrentExerciseType(),
+    reducedRangeEnabled,
     isCorrect,
   });
 
@@ -803,6 +836,7 @@ function handleMidiMessage(message) {
 function init() {
   loadTrialLog();
   populateChromaSetSelect();
+  setupReducedRangeToggle();
   showStartButton();
   setupMidi();
   if (statsButton) {

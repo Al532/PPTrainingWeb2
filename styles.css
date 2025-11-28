@@ -82,6 +82,10 @@ main {
   margin-bottom: 14px;
 }
 
+.controls-row.toggle-row {
+  align-items: flex-start;
+}
+
 .controls-row label {
   font-weight: 600;
 }
@@ -93,6 +97,28 @@ main {
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 1rem;
+}
+
+.checkbox-label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  margin-top: 2px;
+}
+
+.checkbox-label .label {
+  font-weight: 700;
+}
+
+.checkbox-label .small {
+  font-size: 0.95rem;
 }
 
 .buttons {
