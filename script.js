@@ -414,10 +414,8 @@ function populateChromaSetSelect() {
   const savedIndex = loadSavedChromaSetIndex();
   activeChromaSet = chromaSets[savedIndex];
   chromaSetSelect.value = String(savedIndex);
-  chromaSetSelect.addEventListener("focus", () => updateChromaSetOptionLabels(false));
-  chromaSetSelect.addEventListener("blur", handleChromaSetBlur);
-  chromaSetSelect.addEventListener("pointerdown", handleChromaSetMenuOpen);
-  chromaSetSelect.addEventListener("keydown", handleChromaSetKeydown);
+  chromaSetSelect.addEventListener("focus", () => updateChromaSetOptionLabels(true));
+  chromaSetSelect.addEventListener("blur", () => updateChromaSetOptionLabels(false));
   chromaSetSelect.addEventListener("change", handleChromaSetChange);
 }
 
@@ -442,21 +440,6 @@ function handleChromaSetChange(event) {
   updateChromaSetOptionLabels(false);
   showStartButton();
   refreshStatsIfOpen();
-}
-
-function handleChromaSetBlur() {
-  updateChromaSetOptionLabels(false);
-}
-
-function handleChromaSetMenuOpen() {
-  updateChromaSetOptionLabels(true);
-}
-
-function handleChromaSetKeydown(event) {
-  const keysThatOpenMenu = [" ", "Spacebar", "ArrowUp", "ArrowDown", "Enter"];
-  if (keysThatOpenMenu.includes(event.key)) {
-    updateChromaSetOptionLabels(true);
-  }
 }
 
 function loadSavedChromaSetIndex() {
