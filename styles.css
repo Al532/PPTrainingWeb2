@@ -95,6 +95,13 @@ main {
   font-size: 1rem;
 }
 
+#chroma-set-select {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .buttons {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
