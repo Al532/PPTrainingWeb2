@@ -12,7 +12,7 @@ permissions:
 jobs:
   auto-merge:
     name: Auto-merge to main and delete branch
-    if: github.ref_name != 'main'
+    if: github.event.deleted == false && github.ref_name != 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Merge branch into main
