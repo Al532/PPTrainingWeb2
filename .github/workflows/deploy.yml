@@ -1,9 +1,9 @@
 name: Deploy static content to Pages
 
 on:
-  push:
+  delete:
     branches:
-      - main
+      - "**"
   workflow_dispatch:
 
 permissions:
