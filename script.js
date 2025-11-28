@@ -6,6 +6,7 @@ const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
 const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
 const FADE_DURATION_MS = 100;
 const RECENT_ENTRIES = 1000;
+const PREFETCH_TRIAL_COUNT = 10;
 
 
 const chromas = [
@@ -125,7 +126,7 @@ let nextTrialTimeout = null;
 let lastMidiNotePlayed = null;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 let audioContext = null;
-let pendingTrial = null;
+let pendingTrials = [];
 let pendingPreparationPromise = null;
 let pendingPreparationToken = 0;
 let fadeTimeout = null;
@@ -379,7 +380,7 @@ function resetTrialState() {
     exerciseType: "",
     awaitingGuess: false,
   };
-  clearPendingTrial();
+  clearPendingTrials();
 }
 
 function handleStartClick() {
@@ -500,12 +501,16 @@ async function startTrial(attempt = 0) {
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
-    clearPendingTrial();
+    clearPendingTrials();
     return;
   }
 
-  let trial = pendingTrial;
-  pendingTrial = null;
+  let trial = pendingTrials.shift();
+
+  if (!trial && pendingPreparationPromise) {
+    await pendingPreparationPromise;
+    trial = pendingTrials.shift();
+  }
 
   if (!trial) {
     trial = await findPlayableTrial(attempt);
@@ -513,7 +518,7 @@ async function startTrial(attempt = 0) {
 
   if (!trial) {
     currentState.awaitingGuess = false;
-    clearPendingTrial();
+    clearPendingTrials();
     return;
   }
 
@@ -672,31 +677,34 @@ function scheduleNextTrial(feedbackDuration) {
     nextTrialTimeout = null;
     startTrial();
   }, delayUntilNextTrial);
-  if (!pendingTrial && !pendingPreparationPromise) {
+  if (pendingTrials.length < PREFETCH_TRIAL_COUNT && !pendingPreparationPromise) {
     preparePendingTrial();
   }
 }
 
-function clearPendingTrial() {
-  pendingTrial = null;
+function clearPendingTrials() {
+  pendingTrials = [];
   pendingPreparationPromise = null;
   pendingPreparationToken += 1;
 }
 
 async function preparePendingTrial() {
-  if (pendingTrial) return pendingTrial;
+  if (pendingTrials.length >= PREFETCH_TRIAL_COUNT) return pendingTrials[0];
   if (pendingPreparationPromise) return pendingPreparationPromise;
 
   const token = pendingPreparationToken;
   pendingPreparationPromise = (async () => {
-    const trial = await findPlayableTrial();
-    if (token !== pendingPreparationToken) {
-      pendingPreparationPromise = null;
-      return null;
+    while (pendingTrials.length < PREFETCH_TRIAL_COUNT) {
+      const trial = await findPlayableTrial();
+      if (token !== pendingPreparationToken) {
+        pendingPreparationPromise = null;
+        return null;
+      }
+      if (!trial) break;
+      pendingTrials.push(trial);
     }
-    pendingTrial = trial;
     pendingPreparationPromise = null;
-    return trial;
+    return pendingTrials[0] ?? null;
   })();
 
   return pendingPreparationPromise;
