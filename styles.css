@@ -207,9 +207,11 @@ button.chroma {
     color 120ms ease;
 }
 
-button.chroma:hover {
-  background: #22304a;
-  border-color: var(--accent);
+@media (hover: hover) and (pointer: fine) {
+  button.chroma:hover {
+    background: #22304a;
+    border-color: var(--accent);
+  }
 }
 
 button.chroma:active {
