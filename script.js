@@ -342,6 +342,7 @@ function showStartButton() {
   btn.textContent = "START";
   btn.addEventListener("click", handleStartClick);
   buttonsContainer.appendChild(btn);
+  preparePendingTrial();
 }
 
 function getChromaButton(chromaIndex) {
