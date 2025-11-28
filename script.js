@@ -71,7 +71,6 @@ const chromaSets = [
   },
 ].map((set) => ({
   label: `${set.name}: ${set.notes.join(", ")}`,
-  shortLabel: set.name,
   chromas: set.notes.map((note) => ({ label: note, index: chromaLookup[note] })),
   exerciseType: set.exerciseType,
 }));
@@ -405,30 +404,14 @@ function populateChromaSetSelect() {
   chromaSets.forEach((set, index) => {
     const option = document.createElement("option");
     option.value = index;
-    option.dataset.fullLabel = set.label;
-    option.dataset.shortLabel = set.shortLabel;
-    option.textContent = set.shortLabel;
+    option.textContent = set.label;
     chromaSetSelect.appendChild(option);
   });
 
   const savedIndex = loadSavedChromaSetIndex();
   activeChromaSet = chromaSets[savedIndex];
   chromaSetSelect.value = String(savedIndex);
-  chromaSetSelect.addEventListener("focus", () => updateChromaSetOptionLabels(true));
-  chromaSetSelect.addEventListener("blur", () => updateChromaSetOptionLabels(false));
   chromaSetSelect.addEventListener("change", handleChromaSetChange);
-}
-
-function updateChromaSetOptionLabels(useFullLabels = false) {
-  if (!chromaSetSelect?.options?.length) return;
-
-  Array.from(chromaSetSelect.options).forEach((option) => {
-    const fullLabel = option.dataset.fullLabel;
-    const shortLabel = option.dataset.shortLabel;
-    if (!fullLabel || !shortLabel) return;
-
-    option.textContent = useFullLabels ? fullLabel : shortLabel;
-  });
 }
 
 function handleChromaSetChange(event) {
@@ -437,7 +420,6 @@ function handleChromaSetChange(event) {
   if (!selectedSet) return;
   activeChromaSet = selectedSet;
   saveChromaSetSelection(selectedIndex);
-  updateChromaSetOptionLabels(false);
   showStartButton();
   refreshStatsIfOpen();
 }
