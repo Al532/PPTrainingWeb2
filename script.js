@@ -488,9 +488,9 @@ function pickRandomChroma() {
   return activeChromaSet.chromas[idx].index;
 }
 
-function pickRandomNote(chromaIndex) {
+function pickRandomNote(chromaIndex, excludedMidiNote) {
   const notes = notesByChroma[chromaIndex];
-  const pool = notes.filter((note) => note !== lastMidiNotePlayed);
+  const pool = notes.filter((note) => note !== excludedMidiNote);
   const source = pool.length ? pool : notes;
   const idx = Math.floor(Math.random() * source.length);
   return source[idx];
@@ -514,7 +514,11 @@ async function startTrial(attempt = 0) {
   }
 
   if (!trial) {
-    trial = await findPlayableTrial(attempt);
+    const lastQueuedNote =
+      pendingTrials.length > 0
+        ? pendingTrials[pendingTrials.length - 1].midiNote
+        : lastMidiNotePlayed;
+    trial = await findPlayableTrial(attempt, lastQueuedNote);
   }
 
   if (!trial) {
@@ -695,14 +699,19 @@ async function preparePendingTrial() {
 
   const token = pendingPreparationToken;
   pendingPreparationPromise = (async () => {
+    let lastQueuedNote =
+      pendingTrials.length > 0
+        ? pendingTrials[pendingTrials.length - 1].midiNote
+        : lastMidiNotePlayed;
     while (pendingTrials.length < PREFETCH_TRIAL_COUNT) {
-      const trial = await findPlayableTrial();
+      const trial = await findPlayableTrial(0, lastQueuedNote);
       if (token !== pendingPreparationToken) {
         pendingPreparationPromise = null;
         return null;
       }
       if (!trial) break;
       pendingTrials.push(trial);
+      lastQueuedNote = trial.midiNote;
     }
     pendingPreparationPromise = null;
     return pendingTrials[0] ?? null;
@@ -711,7 +720,7 @@ async function preparePendingTrial() {
   return pendingPreparationPromise;
 }
 
-async function findPlayableTrial(attempt = 0) {
+async function findPlayableTrial(attempt = 0, excludedMidiNote = null) {
   const MAX_ATTEMPTS = 30;
   if (!activeChromaSet || !activeChromaSet.chromas.length) return null;
   if (attempt >= MAX_ATTEMPTS) return null;
@@ -719,16 +728,16 @@ async function findPlayableTrial(attempt = 0) {
   const chromaIndex = pickRandomChroma();
   if (chromaIndex === null) return null;
 
-  const midiNote = pickRandomNote(chromaIndex);
+  const midiNote = pickRandomNote(chromaIndex, excludedMidiNote);
   const instrument = await pickInstrumentForNote(midiNote);
 
   if (!instrument) {
-    return findPlayableTrial(attempt + 1);
+    return findPlayableTrial(attempt + 1, excludedMidiNote);
   }
 
   const audioElement = await prepareAudioElement(instrument, midiNote);
   if (!audioElement) {
-    return findPlayableTrial(attempt + 1);
+    return findPlayableTrial(attempt + 1, excludedMidiNote);
   }
 
   return { chromaIndex, midiNote, instrument, audioElement };
