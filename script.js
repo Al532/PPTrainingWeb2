@@ -108,12 +108,16 @@ const chromaSetSelect = document.getElementById("chroma-set-select");
 const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
+const specialExerciseToggle = document.getElementById("special-exercise-toggle");
+const replayButton = document.getElementById("replay-button");
 
 let midiRange = { ...BASE_MIDI_RANGE };
 let reducedRangeEnabled = false;
 let notesByChroma = buildNotesByChroma();
 const availabilityCache = new Map();
 let activeChromaSet = chromaSets[0];
+let specialExerciseEnabled = false;
+let activeTrial = null;
 let currentState = {
   chromaIndex: null,
   midiNote: null,
@@ -123,7 +127,7 @@ let currentState = {
   awaitingGuess: false,
 };
 let feedbackResetTimeout = null;
-let currentAudio = null;
+let currentAudioElements = [];
 let currentAudioGainNode = null;
 let nextTrialTimeout = null;
 let lastMidiNotePlayed = null;
@@ -348,6 +352,33 @@ function setupReducedRangeToggle() {
   });
 }
 
+function setSpecialExerciseEnabled(isEnabled) {
+  specialExerciseEnabled = Boolean(isEnabled);
+  if (specialExerciseToggle) {
+    specialExerciseToggle.checked = specialExerciseEnabled;
+  }
+  showStartButton();
+}
+
+function updateSpecialExerciseAvailability() {
+  const available = Boolean(activeChromaSet?.chromas?.length >= 2);
+  if (!specialExerciseToggle) return;
+
+  specialExerciseToggle.disabled = !available;
+  if (!available && specialExerciseEnabled) {
+    setSpecialExerciseEnabled(false);
+  }
+}
+
+function setupSpecialExerciseToggle() {
+  if (!specialExerciseToggle) return;
+
+  specialExerciseToggle.checked = specialExerciseEnabled;
+  specialExerciseToggle.addEventListener("change", (event) => {
+    setSpecialExerciseEnabled(event.target?.checked);
+  });
+}
+
 function createButtons() {
   if (!activeChromaSet) return;
 
@@ -361,6 +392,12 @@ function createButtons() {
     btn.addEventListener("click", () => handleAnswer(chroma.index));
     buttonsContainer.appendChild(btn);
   });
+}
+
+function setReplayButtonEnabled(isEnabled) {
+  if (!replayButton) return;
+
+  replayButton.disabled = !isEnabled;
 }
 
 function showStartButton() {
@@ -405,6 +442,7 @@ function resetTrialState() {
     feedbackResetTimeout = null;
   }
   resetButtonStates();
+  activeTrial = null;
   currentState = {
     chromaIndex: null,
     midiNote: null,
@@ -414,11 +452,19 @@ function resetTrialState() {
     awaitingGuess: false,
   };
   clearPendingTrials();
+  setReplayButtonEnabled(false);
 }
 
 function handleStartClick() {
   createButtons();
   startTrial();
+}
+
+function replayCurrentTrial() {
+  if (!activeTrial) return;
+
+  fadeOutCurrentAudio();
+  playPreparedTrial(activeTrial);
 }
 
 function scheduleFeedbackReset(durationMs = CORRECT_FEEDBACK_DURATION) {
@@ -444,6 +490,7 @@ function populateChromaSetSelect() {
   activeChromaSet = chromaSets[savedIndex];
   chromaSetSelect.value = String(savedIndex);
   chromaSetSelect.addEventListener("change", handleChromaSetChange);
+  updateSpecialExerciseAvailability();
 }
 
 function handleChromaSetChange(event) {
@@ -454,6 +501,7 @@ function handleChromaSetChange(event) {
   saveChromaSetSelection(selectedIndex);
   showStartButton();
   refreshStatsIfOpen();
+  updateSpecialExerciseAvailability();
 }
 
 function loadSavedChromaSetIndex() {
@@ -520,6 +568,20 @@ function pickRandomChroma() {
   return activeChromaSet.chromas[idx].index;
 }
 
+function pickRandomDistinctChromas(count) {
+  if (!activeChromaSet || !activeChromaSet.chromas.length) return [];
+
+  const available = [...activeChromaSet.chromas];
+  const selected = [];
+  for (let i = 0; i < count && available.length; i += 1) {
+    const idx = Math.floor(Math.random() * available.length);
+    const chroma = available.splice(idx, 1)[0];
+    selected.push(chroma.index);
+  }
+
+  return selected;
+}
+
 function pickRandomNote(chromaIndex, excludedMidiNote) {
   const notes = notesByChroma[chromaIndex];
   const pool = notes.filter((note) => note !== excludedMidiNote);
@@ -535,6 +597,7 @@ async function startTrial(attempt = 0) {
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
     clearPendingTrials();
+    setReplayButtonEnabled(false);
     return;
   }
 
@@ -548,7 +611,7 @@ async function startTrial(attempt = 0) {
   if (!trial) {
     const lastQueuedNote =
       pendingTrials.length > 0
-        ? pendingTrials[pendingTrials.length - 1].midiNote
+        ? pendingTrials[pendingTrials.length - 1].targetMidiNote
         : lastMidiNotePlayed;
     trial = await findPlayableTrial(attempt, lastQueuedNote);
   }
@@ -556,60 +619,72 @@ async function startTrial(attempt = 0) {
   if (!trial) {
     currentState.awaitingGuess = false;
     clearPendingTrials();
+    setReplayButtonEnabled(false);
     return;
   }
 
+  activeTrial = trial;
   currentState = {
-    chromaIndex: trial.chromaIndex,
-    midiNote: trial.midiNote,
-    instrument: trial.instrument,
+    chromaIndex: trial.targetChromaIndex,
+    midiNote: trial.targetMidiNote,
+    instrument: trial.targetInstrument,
     chromaSetLabel: activeChromaSet?.label ?? "",
     exerciseType: activeChromaSet?.exerciseType ?? "",
     awaitingGuess: true,
   };
-  lastMidiNotePlayed = trial.midiNote;
+  lastMidiNotePlayed = trial.targetMidiNote;
   playPreparedTrial(trial);
+  setReplayButtonEnabled(true);
   preparePendingTrial();
 }
 
 function playPreparedTrial(trial) {
-  const { instrument, midiNote, audioElement } = trial;
   const context = getAudioContext();
-  const audio = audioElement ?? new Audio(`assets/${instrument}/${midiNote}.wav`);
-  audio.currentTime = 0;
+  const audios = trial.notes.map((note) => {
+    const baseAudio = note.audioElement;
+    const audio =
+      baseAudio?.cloneNode(true) ||
+      new Audio(`assets/${note.instrument}/${note.midiNote}.wav`);
+    audio.currentTime = 0;
+    return audio;
+  });
+
   if (context) {
-    const source = context.createMediaElementSource(audio);
     const gainNode = context.createGain();
-
     gainNode.gain.setValueAtTime(1, context.currentTime);
-    source.connect(gainNode).connect(context.destination);
 
+    audios.forEach((audio) => {
+      const source = context.createMediaElementSource(audio);
+      source.connect(gainNode);
+    });
+
+    gainNode.connect(context.destination);
     currentAudioGainNode = gainNode;
   } else {
     currentAudioGainNode = null;
   }
 
-  currentAudio = audio;
+  currentAudioElements = audios;
 
-  audio
-    .play()
-    .catch(() => {
+  audios.forEach((audio) => {
+    audio.play().catch(() => {
       // Fail silently to avoid on-screen feedback.
     });
+  });
 }
 
 function fadeOutCurrentAudio() {
   cancelScheduledFade();
-  const audio = currentAudio;
+  const audios = currentAudioElements;
   const gainNode = currentAudioGainNode;
-  if (!audio) return;
+  if (!audios?.length) return;
 
   if (!gainNode) {
-    audio.pause();
-    audio.currentTime = 0;
-    if (currentAudio === audio) {
-      currentAudio = null;
-    }
+    audios.forEach((audio) => {
+      audio.pause();
+      audio.currentTime = 0;
+    });
+    currentAudioElements = [];
     return;
   }
 
@@ -622,13 +697,13 @@ function fadeOutCurrentAudio() {
   gainNode.gain.linearRampToValueAtTime(0, now + fadeDurationSeconds);
 
   const cleanup = () => {
-    audio.pause();
-    audio.currentTime = 0;
+    audios.forEach((audio) => {
+      audio.pause();
+      audio.currentTime = 0;
+    });
     gainNode.disconnect();
-    if (currentAudio === audio) {
-      currentAudio = null;
-      currentAudioGainNode = null;
-    }
+    currentAudioElements = [];
+    currentAudioGainNode = null;
   };
 
   setTimeout(cleanup, FADE_DURATION_MS);
@@ -642,7 +717,7 @@ function cancelScheduledFade() {
 }
 
 function scheduleAudioFade(feedbackDuration) {
-  if (!currentAudio) return;
+  if (!currentAudioElements.length) return;
 
   cancelScheduledFade();
 
@@ -676,6 +751,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     userSelectedChroma: getChromaLabelByIndex(chosenChroma),
     exerciseType: currentState.exerciseType || getCurrentExerciseType(),
     reducedRangeEnabled,
+    specialExerciseEnabled,
     isCorrect,
   });
 
@@ -734,7 +810,7 @@ async function preparePendingTrial() {
   pendingPreparationPromise = (async () => {
     let lastQueuedNote =
       pendingTrials.length > 0
-        ? pendingTrials[pendingTrials.length - 1].midiNote
+        ? pendingTrials[pendingTrials.length - 1].targetMidiNote
         : lastMidiNotePlayed;
     while (pendingTrials.length < PREFETCH_TRIAL_COUNT) {
       const trial = await findPlayableTrial(0, lastQueuedNote);
@@ -744,7 +820,7 @@ async function preparePendingTrial() {
       }
       if (!trial) break;
       pendingTrials.push(trial);
-      lastQueuedNote = trial.midiNote;
+      lastQueuedNote = trial.targetMidiNote;
     }
     pendingPreparationPromise = null;
     return pendingTrials[0] ?? null;
@@ -757,6 +833,41 @@ async function findPlayableTrial(attempt = 0, excludedMidiNote = null) {
   const MAX_ATTEMPTS = 30;
   if (!activeChromaSet || !activeChromaSet.chromas.length) return null;
   if (attempt >= MAX_ATTEMPTS) return null;
+
+  const buildTrialFromNotes = (notes) => {
+    const targetNote = notes.reduce((lowest, note) =>
+      lowest && lowest.midiNote < note.midiNote ? lowest : note
+    );
+    return {
+      notes,
+      targetChromaIndex: targetNote.chromaIndex,
+      targetMidiNote: targetNote.midiNote,
+      targetInstrument: targetNote.instrument,
+    };
+  };
+
+  if (specialExerciseEnabled) {
+    const chromaIndices = pickRandomDistinctChromas(2);
+    if (chromaIndices.length < 2) return null;
+
+    const preparedNotes = [];
+    for (const chromaIndex of chromaIndices) {
+      const midiNote = pickRandomNote(chromaIndex, excludedMidiNote);
+      const instrument = await pickInstrumentForNote(midiNote);
+      if (!instrument) {
+        return findPlayableTrial(attempt + 1, excludedMidiNote);
+      }
+
+      const audioElement = await prepareAudioElement(instrument, midiNote);
+      if (!audioElement) {
+        return findPlayableTrial(attempt + 1, excludedMidiNote);
+      }
+
+      preparedNotes.push({ chromaIndex, midiNote, instrument, audioElement });
+    }
+
+    return buildTrialFromNotes(preparedNotes);
+  }
 
   const chromaIndex = pickRandomChroma();
   if (chromaIndex === null) return null;
@@ -773,7 +884,7 @@ async function findPlayableTrial(attempt = 0, excludedMidiNote = null) {
     return findPlayableTrial(attempt + 1, excludedMidiNote);
   }
 
-  return { chromaIndex, midiNote, instrument, audioElement };
+  return buildTrialFromNotes([{ chromaIndex, midiNote, instrument, audioElement }]);
 }
 
 async function prepareAudioElement(instrument, midiNote) {
@@ -824,6 +935,12 @@ function setupMidi() {
     });
 }
 
+function setupReplayButton() {
+  if (!replayButton) return;
+
+  replayButton.addEventListener("click", replayCurrentTrial);
+}
+
 function handleMidiMessage(message) {
   const [status, data1, data2] = message.data;
   const isNoteOn = (status & 0xf0) === 0x90 && data2 > 0;
@@ -837,6 +954,8 @@ function init() {
   loadTrialLog();
   populateChromaSetSelect();
   setupReducedRangeToggle();
+  setupSpecialExerciseToggle();
+  setupReplayButton();
   showStartButton();
   setupMidi();
   if (statsButton) {
