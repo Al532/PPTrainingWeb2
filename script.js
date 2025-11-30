@@ -6,6 +6,13 @@ import {
   instruments,
   instrumentRanges,
 } from "./data/music.js";
+import {
+  getExerciseTypeFromLabel,
+  loadTrialLog,
+  logTrialResult,
+  refreshStatsIfOpen as refreshStatsIfOpenUtil,
+  renderStats as renderStatsUtil,
+} from "./src/utils/stats.js";
 const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
@@ -52,80 +59,11 @@ let pendingPreparationPromise = null;
 let pendingPreparationToken = 0;
 let fadeTimeout = null;
 let statsPanelOpen = false;
-let trialLog = [];
-let nextTrialNumber = 1;
 let currentTrial = null;
 const audioFormats = {
   mp3: { label: "MP3", folder: "MP3", extension: "mp3" },
   wav: { label: "WAV", folder: "WAV", extension: "wav" },
 };
-
-function formatTrialDate(date) {
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const year = date.getFullYear();
-
-  return `${day}/${month}/${year}`;
-}
-
-function loadTrialLog() {
-  try {
-    const serialized = localStorage.getItem(TRIAL_LOG_STORAGE_KEY);
-    if (!serialized) return;
-
-    const parsed = JSON.parse(serialized);
-    if (Array.isArray(parsed)) {
-      trialLog = parsed.filter((entry) => typeof entry === "object" && entry !== null);
-      const highestTrialNumber = trialLog.reduce((max, entry) => {
-        const number = Number(entry.trialNumber);
-        return Number.isFinite(number) ? Math.max(max, number) : max;
-      }, 0);
-      nextTrialNumber = highestTrialNumber + 1;
-    }
-  } catch (error) {
-    trialLog = [];
-    nextTrialNumber = 1;
-  }
-}
-
-function persistTrialLog() {
-  try {
-    localStorage.setItem(TRIAL_LOG_STORAGE_KEY, JSON.stringify(trialLog));
-  } catch (error) {
-    // Ignore storage errors to avoid disrupting the session.
-  }
-}
-
-function logTrialResult(entry) {
-  const trialDate = formatTrialDate(new Date());
-  const logEntry = { ...entry, trialNumber: nextTrialNumber, trialDate };
-  trialLog.push(logEntry);
-  nextTrialNumber += 1;
-  persistTrialLog();
-}
-
-function calculateAccuracy(entries) {
-  if (!entries.length) return null;
-
-  const correctCount = entries.reduce(
-    (count, entry) => (entry?.isCorrect ? count + 1 : count),
-    0
-  );
-  return Math.round((correctCount / entries.length) * 100);
-}
-
-function getExerciseTypeFromLabel(label = "") {
-  const knownTypes = [
-    "Tritones",
-    "Thirds",
-    "Minor thirds",
-    "Tones",
-    "Chromatic",
-  ];
-
-  const trimmedLabel = label.trim();
-  return knownTypes.find((type) => trimmedLabel.startsWith(type)) ?? "";
-}
 
 function getCurrentExerciseType() {
   return (
@@ -133,67 +71,15 @@ function getCurrentExerciseType() {
   );
 }
 
-function getTrialsForExercise(exerciseType) {
-  if (!exerciseType) return [];
-
-  return trialLog.filter((entry) => {
-    const entryType = entry.exerciseType || getExerciseTypeFromLabel(entry.chromaSetLabel);
-    return entryType === exerciseType;
+const renderStats = () =>
+  renderStatsUtil({
+    statsOutput,
+    getCurrentExerciseType,
+    recentEntriesCount: RECENT_ENTRIES,
   });
-}
-
-function renderStats() {
-  if (!statsOutput) return;
-
-  const totalTrials = trialLog.length;
-  const todayString = formatTrialDate(new Date());
-  const totalTrialsToday = trialLog.reduce(
-    (count, entry) => (entry?.trialDate === todayString ? count + 1 : count),
-    0
-  );
-
-  const exerciseType = getCurrentExerciseType();
-  if (!exerciseType) {
-    statsOutput.innerHTML = `
-      <div class="stats-block">
-        <div class="stats-heading">Overview</div>
-        <p><span class="muted">Total trials:</span> ${totalTrials}</p>
-        <p><span class="muted">Total trials today:</span> ${totalTrialsToday}</p>
-      </div>
-      <p class="muted">Select a chroma set to view stats.</p>
-    `;
-    return;
-  }
-
-  const entries = getTrialsForExercise(exerciseType);
-  const totalExerciseTrials = entries.length;
-  const overallAccuracy = calculateAccuracy(entries);
-  const recentEntries = entries.slice(-RECENT_ENTRIES);
-  const recentAccuracy =
-    recentEntries.length === RECENT_ENTRIES ? calculateAccuracy(recentEntries) : null;
-
-  const overallDisplay = overallAccuracy == null ? "-" : `${overallAccuracy}%`;
-  const recentDisplay = recentAccuracy == null ? "-" : `${recentAccuracy}%`;
-
-  statsOutput.innerHTML = `
-    <div class="stats-block">
-      <div class="stats-heading">Overview</div>
-      <p><span class="muted">Total trials:</span> ${totalTrials}</p>
-      <p><span class="muted">Total trials today:</span> ${totalTrialsToday}</p>
-    </div>
-    <div class="stats-block">
-      <div class="stats-heading">${exerciseType}</div>
-      <p><span class="muted">Total trials:</span> ${totalExerciseTrials}</p>
-      <p><span class="muted">Overall accuracy:</span> ${overallDisplay}</p>
-      <p><span class="muted">Last 1000 trials accuracy:</span> ${recentDisplay}</p>
-    </div>
-  `;
-}
 
 function refreshStatsIfOpen() {
-  if (statsPanelOpen) {
-    renderStats();
-  }
+  refreshStatsIfOpenUtil(statsPanelOpen, renderStats);
 }
 
 function setStatsPanelOpen(isOpen) {
@@ -664,16 +550,19 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
   const chosenButton = getChromaButton(chosenChroma);
   const correctButton = getChromaButton(currentState.chromaIndex);
 
-  logTrialResult({
-    chromaSetLabel: currentState.chromaSetLabel,
-    targetChromaLabel: getChromaLabelByIndex(currentState.chromaIndex),
-    midiNote: currentState.midiNote,
-    instrument: currentState.instrument,
-    userSelectedChroma: getChromaLabelByIndex(chosenChroma),
-    exerciseType: currentState.exerciseType || getCurrentExerciseType(),
-    reducedRangeEnabled,
-    isCorrect,
-  });
+  logTrialResult(
+    {
+      chromaSetLabel: currentState.chromaSetLabel,
+      targetChromaLabel: getChromaLabelByIndex(currentState.chromaIndex),
+      midiNote: currentState.midiNote,
+      instrument: currentState.instrument,
+      userSelectedChroma: getChromaLabelByIndex(chosenChroma),
+      exerciseType: currentState.exerciseType || getCurrentExerciseType(),
+      reducedRangeEnabled,
+      isCorrect,
+    },
+    { storageKey: TRIAL_LOG_STORAGE_KEY }
+  );
 
   refreshStatsIfOpen();
 
@@ -830,7 +719,7 @@ function handleMidiMessage(message) {
 }
 
 function init() {
-  loadTrialLog();
+  loadTrialLog(TRIAL_LOG_STORAGE_KEY);
   populateChromaSetSelect();
   setupReducedRangeToggle();
   showStartButton();
