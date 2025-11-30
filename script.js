@@ -7,6 +7,8 @@ const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
 const FADE_DURATION_MS = 100;
 const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
+// Toggle between "mp3" or "wav" to switch the asset set without exposing UI controls.
+const DEFAULT_AUDIO_FORMAT = "mp3";
 
 
 const chromas = [
@@ -115,6 +117,7 @@ let reducedRangeEnabled = false;
 let notesByChroma = buildNotesByChroma();
 const availabilityCache = new Map();
 let activeChromaSet = chromaSets[0];
+let audioFormat = DEFAULT_AUDIO_FORMAT;
 let currentState = {
   chromaIndex: null,
   midiNote: null,
@@ -138,6 +141,10 @@ let statsPanelOpen = false;
 let trialLog = [];
 let nextTrialNumber = 1;
 let currentTrial = null;
+const audioFormats = {
+  mp3: { label: "MP3", folder: "MP3", extension: "mp3" },
+  wav: { label: "WAV", folder: "WAV", extension: "wav" },
+};
 
 function formatTrialDate(date) {
   const day = String(date.getDate()).padStart(2, "0");
@@ -350,6 +357,10 @@ function setupReducedRangeToggle() {
   });
 }
 
+function getAudioFormatConfig(format = audioFormat) {
+  return audioFormats[format] ?? audioFormats.mp3;
+}
+
 function createButtons() {
   if (!activeChromaSet) return;
 
@@ -493,14 +504,21 @@ function saveChromaSetSelection(index) {
   }
 }
 
+function getAudioSrc(instrument, midiNote, format = audioFormat) {
+  const { folder, extension } = getAudioFormatConfig(format);
+  return `assets/${folder}/${instrument}/${midiNote}.${extension}`;
+}
+
 async function checkSampleExists(instrument, midiNote) {
-  const key = `${instrument}-${midiNote}`;
+  const key = `${audioFormat}-${instrument}-${midiNote}`;
   if (availabilityCache.has(key)) {
     return availabilityCache.get(key);
   }
 
+  const src = getAudioSrc(instrument, midiNote);
+
   try {
-    const response = await fetch(`assets/${instrument}/${midiNote}.wav`, {
+    const response = await fetch(src, {
       method: "HEAD",
     });
     const ok = response.ok;
@@ -616,7 +634,7 @@ function getAudioElementForTrial(trial) {
     }
   }
 
-  const audio = new Audio(`assets/${trial.instrument}/${trial.midiNote}.wav`);
+  const audio = new Audio(getAudioSrc(trial.instrument, trial.midiNote));
   audio.preload = "auto";
   return audio;
 }
@@ -841,7 +859,7 @@ async function findPlayableTrial(attempt = 0, excludedMidiNote = null) {
 }
 
 async function prepareAudioElement(instrument, midiNote) {
-  const src = `assets/${instrument}/${midiNote}.wav`;
+  const src = getAudioSrc(instrument, midiNote);
   const audio = new Audio(src);
   audio.preload = "auto";
 
