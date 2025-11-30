@@ -5,14 +5,14 @@ import {
   chromaSets,
   instruments,
   instrumentRanges,
-} from "./data/music.js";
+} from "./music.js";
 import {
   getExerciseTypeFromLabel,
   loadTrialLog,
   logTrialResult,
   refreshStatsIfOpen as refreshStatsIfOpenUtil,
   renderStats as renderStatsUtil,
-} from "./src/utils/stats.js";
+} from "./stats.js";
 const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
@@ -23,6 +23,102 @@ const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
 // Toggle between "mp3" or "wav" to switch the asset set without exposing UI controls.
 const DEFAULT_AUDIO_FORMAT = "mp3";
+const CRYPTIC_WORDS = [
+  "ba",
+  "be",
+  "bi",
+  "bo",
+  "bu",
+  "ca",
+  "ce",
+  "ci",
+  "co",
+  "cu",
+  "da",
+  "de",
+  "di",
+  "du",
+  "fe",
+  "fi",
+  "fo",
+  "fu",
+  "ga",
+  "ge",
+  "gi",
+  "go",
+  "gu",
+  "ha",
+  "he",
+  "hi",
+  "ho",
+  "hu",
+  "ja",
+  "je",
+  "ji",
+  "jo",
+  "ju",
+  "ka",
+  "ke",
+  "ki",
+  "ko",
+  "ku",
+  "le",
+  "li",
+  "lo",
+  "lu",
+  "ma",
+  "me",
+  "mo",
+  "mu",
+  "na",
+  "ne",
+  "ni",
+  "no",
+  "nu",
+  "pa",
+  "pe",
+  "pi",
+  "po",
+  "pu",
+  "qa",
+  "qe",
+  "qi",
+  "qo",
+  "qu",
+  "ra",
+  "ri",
+  "ro",
+  "ru",
+  "sa",
+  "se",
+  "so",
+  "su",
+  "ta",
+  "te",
+  "ti",
+  "to",
+  "tu",
+  "va",
+  "ve",
+  "vi",
+  "vo",
+  "vu",
+  "wa",
+  "we",
+  "wi",
+  "wo",
+  "wu",
+  "xa",
+  "xe",
+  "xi",
+  "xo",
+  "xu",
+  "za",
+  "ze",
+  "zi",
+  "zo",
+  "zu",
+];
 
 
 const buttonsContainer = document.getElementById("chroma-buttons");
@@ -31,6 +127,7 @@ const chromaSetSelect = document.getElementById("chroma-set-select");
 const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
+const crypticToggle = document.getElementById("cryptic-toggle");
 const replayButton = document.getElementById("replay-button");
 
 let midiRange = { ...BASE_MIDI_RANGE };
@@ -39,6 +136,9 @@ let notesByChroma = buildNotesByChroma();
 const availabilityCache = new Map();
 let activeChromaSet = chromaSets[0];
 let audioFormat = DEFAULT_AUDIO_FORMAT;
+let crypticModeEnabled = false;
+let crypticAssignments = new Map();
+let crypticButtonOrder = [];
 let currentState = {
   chromaIndex: null,
   midiNote: null,
@@ -157,19 +257,105 @@ function setupReducedRangeToggle() {
   });
 }
 
+function setupCrypticToggle() {
+  if (!crypticToggle) return;
+
+  crypticToggle.checked = crypticModeEnabled;
+  crypticToggle.addEventListener("change", (event) => {
+    applyCrypticMode(event.target?.checked);
+  });
+}
+
 function getAudioFormatConfig(format = audioFormat) {
   return audioFormats[format] ?? audioFormats.mp3;
+}
+
+function shuffleArray(values = []) {
+  const array = [...values];
+  for (let i = array.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+function resetCrypticAssignments() {
+  crypticAssignments = new Map();
+  crypticButtonOrder = [];
+}
+
+function randomizeCrypticAssignments() {
+  resetCrypticAssignments();
+
+  if (!activeChromaSet || !activeChromaSet.chromas.length) return;
+
+  const shuffledWords = shuffleArray(CRYPTIC_WORDS);
+
+  activeChromaSet.chromas.forEach((chroma, index) => {
+    const chosenWord = shuffledWords[index % shuffledWords.length];
+    crypticAssignments.set(chroma.index, chosenWord);
+  });
+
+  crypticButtonOrder = shuffleArray(
+    activeChromaSet.chromas.map((chroma) => chroma.index)
+  );
+}
+
+function ensureCrypticAssignments() {
+  if (!crypticModeEnabled) return;
+  const expectedCount = activeChromaSet?.chromas?.length ?? 0;
+  if (
+    crypticAssignments.size !== expectedCount ||
+    crypticButtonOrder.length !== expectedCount
+  ) {
+    randomizeCrypticAssignments();
+  }
+}
+
+function rerenderButtonsAfterCrypticToggle() {
+  const hasStartButton = Boolean(buttonsContainer.querySelector("#start-button"));
+  if (!hasStartButton) {
+    createButtons();
+  }
+}
+
+function applyCrypticMode(isEnabled) {
+  crypticModeEnabled = Boolean(isEnabled);
+  if (crypticModeEnabled) {
+    randomizeCrypticAssignments();
+  } else {
+    resetCrypticAssignments();
+  }
+  rerenderButtonsAfterCrypticToggle();
 }
 
 function createButtons() {
   if (!activeChromaSet) return;
 
+  if (crypticModeEnabled) {
+    ensureCrypticAssignments();
+  } else {
+    resetCrypticAssignments();
+  }
+
   buttonsContainer.innerHTML = "";
-  activeChromaSet.chromas.forEach((chroma) => {
+  const chromaByIndex = new Map(
+    activeChromaSet.chromas.map((chroma) => [chroma.index, chroma])
+  );
+
+  const chromaOrder = crypticModeEnabled
+    ? crypticButtonOrder
+    : activeChromaSet.chromas.map((chroma) => chroma.index);
+
+  chromaOrder.forEach((chromaIndex) => {
+    const chroma = chromaByIndex.get(chromaIndex);
+    if (!chroma) return;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "chroma";
-    btn.textContent = chroma.label;
+    btn.textContent = crypticModeEnabled
+      ? crypticAssignments.get(chroma.index)
+      : chroma.label;
     btn.dataset.index = chroma.index;
     btn.addEventListener("click", () => handleAnswer(chroma.index));
     buttonsContainer.appendChild(btn);
@@ -277,6 +463,11 @@ function handleChromaSetChange(event) {
   const selectedSet = chromaSets[selectedIndex];
   if (!selectedSet) return;
   activeChromaSet = selectedSet;
+  if (crypticModeEnabled) {
+    randomizeCrypticAssignments();
+  } else {
+    resetCrypticAssignments();
+  }
   saveChromaSetSelection(selectedIndex);
   showStartButton();
   refreshStatsIfOpen();
@@ -722,6 +913,7 @@ function init() {
   loadTrialLog(TRIAL_LOG_STORAGE_KEY);
   populateChromaSetSelect();
   setupReducedRangeToggle();
+  setupCrypticToggle();
   showStartButton();
   setupMidi();
   if (statsButton) {
