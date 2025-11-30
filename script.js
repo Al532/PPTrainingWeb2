@@ -108,6 +108,7 @@ const chromaSetSelect = document.getElementById("chroma-set-select");
 const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
+const replayButton = document.getElementById("replay-button");
 
 let midiRange = { ...BASE_MIDI_RANGE };
 let reducedRangeEnabled = false;
@@ -136,6 +137,7 @@ let fadeTimeout = null;
 let statsPanelOpen = false;
 let trialLog = [];
 let nextTrialNumber = 1;
+let currentTrial = null;
 
 function formatTrialDate(date) {
   const day = String(date.getDate()).padStart(2, "0");
@@ -375,6 +377,7 @@ function showStartButton() {
   btn.addEventListener("click", handleStartClick);
   buttonsContainer.appendChild(btn);
   preparePendingTrial();
+  updateReplayAvailability();
 }
 
 function getChromaButton(chromaIndex) {
@@ -400,6 +403,7 @@ function resetTrialState() {
   cancelNextTrialTimeout();
   cancelScheduledFade();
   fadeOutCurrentAudio();
+  currentTrial = null;
   if (feedbackResetTimeout) {
     clearTimeout(feedbackResetTimeout);
     feedbackResetTimeout = null;
@@ -419,6 +423,17 @@ function resetTrialState() {
 function handleStartClick() {
   createButtons();
   startTrial();
+}
+
+function updateReplayAvailability() {
+  if (!replayButton) return;
+
+  const canReplay =
+    currentState.awaitingGuess &&
+    currentTrial?.instrument &&
+    Number.isFinite(currentTrial?.midiNote);
+
+  replayButton.disabled = !canReplay;
 }
 
 function scheduleFeedbackReset(durationMs = CORRECT_FEEDBACK_DURATION) {
@@ -556,6 +571,8 @@ async function startTrial(attempt = 0) {
   if (!trial) {
     currentState.awaitingGuess = false;
     clearPendingTrials();
+    currentTrial = null;
+    updateReplayAvailability();
     return;
   }
 
@@ -567,16 +584,51 @@ async function startTrial(attempt = 0) {
     exerciseType: activeChromaSet?.exerciseType ?? "",
     awaitingGuess: true,
   };
+  currentTrial = trial;
   lastMidiNotePlayed = trial.midiNote;
+  updateReplayAvailability();
   playPreparedTrial(trial);
   preparePendingTrial();
 }
 
+function stopCurrentAudio() {
+  cancelScheduledFade();
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+    currentAudio = null;
+  }
+
+  if (currentAudioGainNode) {
+    currentAudioGainNode.disconnect();
+    currentAudioGainNode = null;
+  }
+}
+
+function getAudioElementForTrial(trial) {
+  if (trial?.audioElement) {
+    try {
+      const clone = trial.audioElement.cloneNode(true);
+      clone.currentTime = 0;
+      return clone;
+    } catch (error) {
+      // Ignore clone errors and fall back to a fresh audio element.
+    }
+  }
+
+  const audio = new Audio(`assets/${trial.instrument}/${trial.midiNote}.wav`);
+  audio.preload = "auto";
+  return audio;
+}
+
 function playPreparedTrial(trial) {
-  const { instrument, midiNote, audioElement } = trial;
+  const { instrument, midiNote } = trial;
+  const audio = getAudioElementForTrial(trial);
+  if (!audio) return;
+
+  stopCurrentAudio();
+
   const context = getAudioContext();
-  const audio = audioElement ?? new Audio(`assets/${instrument}/${midiNote}.wav`);
-  audio.currentTime = 0;
   if (context) {
     const source = context.createMediaElementSource(audio);
     const gainNode = context.createGain();
@@ -596,6 +648,16 @@ function playPreparedTrial(trial) {
     .catch(() => {
       // Fail silently to avoid on-screen feedback.
     });
+}
+
+function replayCurrentTrial() {
+  if (!currentState.awaitingGuess || !currentTrial) return;
+
+  playPreparedTrial(currentTrial);
+}
+
+function handleReplayClick() {
+  replayCurrentTrial();
 }
 
 function fadeOutCurrentAudio() {
@@ -659,10 +721,12 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
   if (!currentState.awaitingGuess) return;
 
   currentState.awaitingGuess = false;
+  currentTrial = null;
   if (feedbackResetTimeout) {
     clearTimeout(feedbackResetTimeout);
     feedbackResetTimeout = null;
   }
+  updateReplayAvailability();
 
   const isCorrect = chosenChroma === currentState.chromaIndex;
   const chosenButton = getChromaButton(chosenChroma);
@@ -841,6 +905,9 @@ function init() {
   setupMidi();
   if (statsButton) {
     statsButton.addEventListener("click", toggleStatsPanel);
+  }
+  if (replayButton) {
+    replayButton.addEventListener("click", handleReplayClick);
   }
   if (statsOutput) {
     statsOutput.textContent = "Select a chroma set to view stats.";

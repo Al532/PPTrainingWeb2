@@ -127,6 +127,16 @@ main {
   gap: 12px;
 }
 
+.replay-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.replay-button {
+  min-width: 120px;
+}
+
 .stats {
   margin-top: 28px;
 }
