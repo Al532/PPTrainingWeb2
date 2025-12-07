@@ -128,11 +128,8 @@ main {
   margin-top: 8px;
 }
 
-.custom-chroma-buttons .chroma {
-  border: none;
-}
-
 .custom-chroma-buttons .chroma.selected {
+  border-color: var(--accent);
   background: rgba(88, 166, 255, 0.2);
 }
 
