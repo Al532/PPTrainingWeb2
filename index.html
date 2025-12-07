@@ -34,6 +34,7 @@
           </div>
         </label>
       </div>
+      <!--
       <div class="controls-row toggle-row">
         <label class="checkbox-label">
           <input type="checkbox" id="cryptic-toggle">
@@ -42,6 +43,14 @@
             <div class="muted small">Randomizes labels with syllables and shuffles button order.</div>
           </div>
         </label>
+      </div>
+      -->
+      <div class="controls-row custom-row">
+        <button type="button" id="custom-chroma-button" class="secondary-button">Custom chroma set</button>
+      </div>
+      <div id="custom-chroma-picker" class="custom-chroma-picker" hidden>
+        <p class="muted small">Sélectionnez les chromas que vous souhaitez activer.</p>
+        <div id="custom-chroma-buttons" class="buttons custom-chroma-buttons"></div>
       </div>
       <div class="replay-row">
         <button type="button" id="replay-button" class="chroma replay-button" disabled>
