@@ -17,6 +17,7 @@ const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
 const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
+const CUSTOM_CHROMA_STORAGE_KEY = "ppt-custom-chromas";
 const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
 const FADE_DURATION_MS = 100;
 const RECENT_ENTRIES = 1000;
@@ -124,17 +125,26 @@ const CRYPTIC_WORDS = [
 const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
 const chromaSetSelect = document.getElementById("chroma-set-select");
+const customChromaButton = document.getElementById("custom-chroma-button");
+const customChromaButtons = document.getElementById("custom-chroma-buttons");
+const customChromaPicker = document.getElementById("custom-chroma-picker");
 const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
-const crypticToggle = document.getElementById("cryptic-toggle");
+// const crypticToggle = document.getElementById("cryptic-toggle");
 const replayButton = document.getElementById("replay-button");
 
 let midiRange = { ...BASE_MIDI_RANGE };
 let reducedRangeEnabled = false;
 let notesByChroma = buildNotesByChroma();
 const availabilityCache = new Map();
+const CUSTOM_CHROMA_SET_VALUE = "custom";
 let activeChromaSet = chromaSets[0];
+let activeChromaSetValue = "0";
+let customChromaSelection = loadSavedCustomChromaSelection();
+let customChromaSet = buildCustomChromaSet(customChromaSelection);
+let isCustomSelectionOpen = false;
+let pendingCustomSelection = new Set(customChromaSelection);
 let audioFormat = DEFAULT_AUDIO_FORMAT;
 let crypticModeEnabled = false;
 let crypticAssignments = new Map();
@@ -257,14 +267,14 @@ function setupReducedRangeToggle() {
   });
 }
 
-function setupCrypticToggle() {
-  if (!crypticToggle) return;
+// function setupCrypticToggle() {
+//   if (!crypticToggle) return;
 
-  crypticToggle.checked = crypticModeEnabled;
-  crypticToggle.addEventListener("change", (event) => {
-    applyCrypticMode(event.target?.checked);
-  });
-}
+//   crypticToggle.checked = crypticModeEnabled;
+//   crypticToggle.addEventListener("change", (event) => {
+//     applyCrypticMode(event.target?.checked);
+//   });
+// }
 
 function getAudioFormatConfig(format = audioFormat) {
   return audioFormats[format] ?? audioFormats.mp3;
@@ -284,68 +294,21 @@ function resetCrypticAssignments() {
   crypticButtonOrder = [];
 }
 
-function randomizeCrypticAssignments() {
-  resetCrypticAssignments();
-
-  if (!activeChromaSet || !activeChromaSet.chromas.length) return;
-
-  const shuffledWords = shuffleArray(CRYPTIC_WORDS);
-
-  activeChromaSet.chromas.forEach((chroma, index) => {
-    const chosenWord = shuffledWords[index % shuffledWords.length];
-    crypticAssignments.set(chroma.index, chosenWord);
-  });
-
-  crypticButtonOrder = shuffleArray(
-    activeChromaSet.chromas.map((chroma) => chroma.index)
-  );
-}
-
-function ensureCrypticAssignments() {
-  if (!crypticModeEnabled) return;
-  const expectedCount = activeChromaSet?.chromas?.length ?? 0;
-  if (
-    crypticAssignments.size !== expectedCount ||
-    crypticButtonOrder.length !== expectedCount
-  ) {
-    randomizeCrypticAssignments();
-  }
-}
-
-function rerenderButtonsAfterCrypticToggle() {
-  const hasStartButton = Boolean(buttonsContainer.querySelector("#start-button"));
-  if (!hasStartButton) {
-    createButtons();
-  }
-}
-
-function applyCrypticMode(isEnabled) {
-  crypticModeEnabled = Boolean(isEnabled);
-  if (crypticModeEnabled) {
-    randomizeCrypticAssignments();
-  } else {
-    resetCrypticAssignments();
-  }
-  rerenderButtonsAfterCrypticToggle();
-}
-
 function createButtons() {
   if (!activeChromaSet) return;
 
-  if (crypticModeEnabled) {
-    ensureCrypticAssignments();
-  } else {
-    resetCrypticAssignments();
-  }
+  // Cryptic mode disabled.
+  resetCrypticAssignments();
 
   buttonsContainer.innerHTML = "";
   const chromaByIndex = new Map(
     activeChromaSet.chromas.map((chroma) => [chroma.index, chroma])
   );
 
-  const chromaOrder = crypticModeEnabled
-    ? crypticButtonOrder
-    : activeChromaSet.chromas.map((chroma) => chroma.index);
+  // const chromaOrder = crypticModeEnabled
+  //   ? crypticButtonOrder
+  //   : activeChromaSet.chromas.map((chroma) => chroma.index);
+  const chromaOrder = activeChromaSet.chromas.map((chroma) => chroma.index);
 
   chromaOrder.forEach((chromaIndex) => {
     const chroma = chromaByIndex.get(chromaIndex);
@@ -353,9 +316,10 @@ function createButtons() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "chroma";
-    btn.textContent = crypticModeEnabled
-      ? crypticAssignments.get(chroma.index)
-      : chroma.label;
+    // btn.textContent = crypticModeEnabled
+    //   ? crypticAssignments.get(chroma.index)
+    //   : chroma.label;
+    btn.textContent = chroma.label;
     btn.dataset.index = chroma.index;
     btn.addEventListener("click", () => handleAnswer(chroma.index));
     buttonsContainer.appendChild(btn);
@@ -444,55 +408,238 @@ function scheduleFeedbackReset(durationMs = CORRECT_FEEDBACK_DURATION) {
   }, durationMs);
 }
 
-function populateChromaSetSelect() {
-  chromaSets.forEach((set, index) => {
+function buildCustomChromaSet(selection = []) {
+  const uniqueIndices = Array.from(
+    new Set(
+      selection.filter(
+        (index) => Number.isInteger(index) && index >= 0 && index < chromas.length
+      )
+    )
+  ).sort((a, b) => a - b);
+
+  const selectedChromas = uniqueIndices
+    .map((index) => chromas.find((chroma) => chroma.index === index))
+    .filter(Boolean);
+
+  const labelSuffix = selectedChromas.map((chroma) => chroma.label).join(", ");
+
+  return {
+    label: `Custom: ${labelSuffix || "aucun chroma"}`,
+    chromas: selectedChromas,
+    exerciseType: "custom",
+  };
+}
+
+function loadSavedCustomChromaSelection() {
+  try {
+    const storedValue = localStorage.getItem(CUSTOM_CHROMA_STORAGE_KEY);
+    if (storedValue) {
+      const parsed = JSON.parse(storedValue);
+      if (Array.isArray(parsed) && parsed.length) {
+        return parsed
+          .map((value) => Number.parseInt(value, 10))
+          .filter((value) => Number.isInteger(value))
+          .sort((a, b) => a - b);
+      }
+    }
+  } catch (error) {
+    // Ignore storage errors and fall back to defaults.
+  }
+
+  return chromas.map((chroma) => chroma.index);
+}
+
+function saveCustomChromaSelection(selection) {
+  try {
+    localStorage.setItem(CUSTOM_CHROMA_STORAGE_KEY, JSON.stringify(selection));
+  } catch (error) {
+    // Ignore storage errors; the selection just won't persist.
+  }
+}
+
+function getChromaSetOptions() {
+  return [...chromaSets, customChromaSet];
+}
+
+function renderChromaSetOptions(selectedValue, { skipActivation = false } = {}) {
+  const chromaSetOptions = getChromaSetOptions();
+  const resolvedValue = getValidChromaSetValue(selectedValue);
+
+  chromaSetSelect.innerHTML = "";
+
+  chromaSetOptions.forEach((set, index) => {
     const option = document.createElement("option");
-    option.value = index;
+    const isCustom = set.exerciseType === "custom";
+    option.value = isCustom ? CUSTOM_CHROMA_SET_VALUE : String(index);
     option.textContent = set.label;
     chromaSetSelect.appendChild(option);
   });
 
-  const savedIndex = loadSavedChromaSetIndex();
-  activeChromaSet = chromaSets[savedIndex];
-  chromaSetSelect.value = String(savedIndex);
-  chromaSetSelect.addEventListener("change", handleChromaSetChange);
+  chromaSetSelect.value = resolvedValue;
+  if (!skipActivation) {
+    setActiveChromaSetByValue(resolvedValue, { skipSave: true });
+  }
 }
 
 function handleChromaSetChange(event) {
-  const selectedIndex = Number(event.target.value);
-  const selectedSet = chromaSets[selectedIndex];
-  if (!selectedSet) return;
-  activeChromaSet = selectedSet;
-  if (crypticModeEnabled) {
-    randomizeCrypticAssignments();
-  } else {
-    resetCrypticAssignments();
+  if (isCustomSelectionOpen) {
+    closeCustomChromaPicker();
   }
-  saveChromaSetSelection(selectedIndex);
-  showStartButton();
-  refreshStatsIfOpen();
+  setActiveChromaSetByValue(event.target.value);
 }
 
-function loadSavedChromaSetIndex() {
+function getValidChromaSetValue(value) {
+  const chromaSetOptions = getChromaSetOptions();
+  const parsed = Number.parseInt(value, 10);
+  if (
+    Number.isInteger(parsed) &&
+    parsed >= 0 &&
+    parsed < chromaSets.length &&
+    chromaSetOptions[parsed]
+  ) {
+    return String(parsed);
+  }
+
+  if (value === CUSTOM_CHROMA_SET_VALUE && customChromaSet.chromas.length) {
+    return CUSTOM_CHROMA_SET_VALUE;
+  }
+
+  return "0";
+}
+
+function loadSavedChromaSetValue() {
   try {
     const storedValue = localStorage.getItem(LAST_CHROMA_SET_KEY);
+    if (storedValue === CUSTOM_CHROMA_SET_VALUE) {
+      return storedValue;
+    }
+
     const parsed = Number.parseInt(storedValue ?? "", 10);
     if (Number.isInteger(parsed) && chromaSets[parsed]) {
-      return parsed;
+      return String(parsed);
     }
   } catch (error) {
     // Ignore storage errors and fall back to default.
   }
 
-  return 0;
+  return "0";
 }
 
-function saveChromaSetSelection(index) {
+function saveChromaSetSelection(value) {
   try {
-    localStorage.setItem(LAST_CHROMA_SET_KEY, String(index));
+    localStorage.setItem(LAST_CHROMA_SET_KEY, String(value));
   } catch (error) {
     // Ignore storage errors; the selection just won't persist.
   }
+}
+
+function setActiveChromaSetByValue(value, { skipSave = false } = {}) {
+  const resolvedValue = getValidChromaSetValue(value);
+  activeChromaSetValue = resolvedValue;
+  activeChromaSet =
+    resolvedValue === CUSTOM_CHROMA_SET_VALUE
+      ? customChromaSet
+      : chromaSets[Number(resolvedValue)];
+  if (chromaSetSelect) {
+    chromaSetSelect.value = resolvedValue;
+  }
+  resetCrypticAssignments();
+  if (!skipSave) {
+    saveChromaSetSelection(resolvedValue);
+  }
+  showStartButton();
+  refreshStatsIfOpen();
+}
+
+function populateChromaSetSelect() {
+  const savedValue = loadSavedChromaSetValue();
+  renderChromaSetOptions(savedValue);
+  chromaSetSelect.addEventListener("change", handleChromaSetChange);
+}
+
+function updateCustomChromaSet(selection, { shouldSelectCustom = true } = {}) {
+  customChromaSelection = Array.from(
+    new Set(
+      selection.filter(
+        (index) => Number.isInteger(index) && index >= 0 && index < chromas.length
+      )
+    )
+  ).sort((a, b) => a - b);
+  pendingCustomSelection = new Set(customChromaSelection);
+  customChromaSet = buildCustomChromaSet(customChromaSelection);
+  saveCustomChromaSelection(customChromaSelection);
+  renderChromaSetOptions(activeChromaSetValue, { skipActivation: true });
+  if (shouldSelectCustom) {
+    setActiveChromaSetByValue(CUSTOM_CHROMA_SET_VALUE);
+  }
+}
+
+function toggleCustomChromaSelection(chromaIndex) {
+  if (pendingCustomSelection.has(chromaIndex)) {
+    pendingCustomSelection.delete(chromaIndex);
+  } else {
+    pendingCustomSelection.add(chromaIndex);
+  }
+}
+
+function renderCustomChromaButtons() {
+  if (!customChromaButtons) return;
+  customChromaButtons.innerHTML = "";
+  chromas.forEach((chroma) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chroma";
+    const isSelected = pendingCustomSelection.has(chroma.index);
+    if (isSelected) {
+      btn.classList.add("selected");
+    }
+    btn.textContent = chroma.label;
+    btn.addEventListener("click", () => {
+      toggleCustomChromaSelection(chroma.index);
+      btn.classList.toggle("selected", pendingCustomSelection.has(chroma.index));
+    });
+    customChromaButtons.appendChild(btn);
+  });
+}
+
+function openCustomChromaPicker() {
+  if (!customChromaPicker || !customChromaButton) return;
+  isCustomSelectionOpen = true;
+  customChromaPicker.hidden = false;
+  customChromaButton.textContent = "OK";
+  pendingCustomSelection = new Set(customChromaSelection);
+  renderCustomChromaButtons();
+}
+
+function closeCustomChromaPicker() {
+  if (!customChromaPicker || !customChromaButton) return;
+  isCustomSelectionOpen = false;
+  customChromaPicker.hidden = true;
+  customChromaButton.textContent = "Custom chroma set";
+}
+
+function confirmCustomChromaSelection() {
+  const selection = Array.from(pendingCustomSelection).sort((a, b) => a - b);
+  if (!selection.length) {
+    alert("Sélectionnez au moins un chroma pour le custom set.");
+    return;
+  }
+
+  updateCustomChromaSet(selection);
+  closeCustomChromaPicker();
+}
+
+function setupCustomChromaButton() {
+  if (!customChromaButton || !customChromaPicker || !customChromaButtons) return;
+
+  customChromaPicker.hidden = true;
+  customChromaButton.addEventListener("click", () => {
+    if (!isCustomSelectionOpen) {
+      openCustomChromaPicker();
+    } else {
+      confirmCustomChromaSelection();
+    }
+  });
 }
 
 function getAudioSrc(instrument, midiNote, format = audioFormat) {
@@ -913,7 +1060,8 @@ function init() {
   loadTrialLog(TRIAL_LOG_STORAGE_KEY);
   populateChromaSetSelect();
   setupReducedRangeToggle();
-  setupCrypticToggle();
+  // setupCrypticToggle();
+  setupCustomChromaButton();
   showStartButton();
   setupMidi();
   if (statsButton) {
