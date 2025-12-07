@@ -25,6 +25,9 @@
         <label for="chroma-set-select">Chroma set</label>
         <select id="chroma-set-select"></select>
       </div>
+      <div class="controls-row custom-row" id="custom-chroma-row">
+        <button type="button" id="custom-chroma-button" class="secondary-button">Custom chroma set</button>
+      </div>
       <div class="controls-row toggle-row">
         <label class="checkbox-label">
           <input type="checkbox" id="reduced-range-toggle">
@@ -34,28 +37,14 @@
           </div>
         </label>
       </div>
-      <!--
-      <div class="controls-row toggle-row">
-        <label class="checkbox-label">
-          <input type="checkbox" id="cryptic-toggle">
-          <div>
-            <div class="label">Cryptic mode</div>
-            <div class="muted small">Randomizes labels with syllables and shuffles button order.</div>
-          </div>
-        </label>
-      </div>
-      -->
-      <div class="controls-row custom-row">
-        <button type="button" id="custom-chroma-button" class="secondary-button">Custom chroma set</button>
-      </div>
-      <div id="custom-chroma-picker" class="custom-chroma-picker" hidden>
-        <p class="muted small">Sélectionnez les chromas que vous souhaitez activer.</p>
-        <div id="custom-chroma-buttons" class="buttons custom-chroma-buttons"></div>
-      </div>
-      <div class="replay-row">
+      <div class="replay-row" id="replay-row">
         <button type="button" id="replay-button" class="chroma replay-button" disabled>
           Replay
         </button>
+      </div>
+      <div id="custom-chroma-picker" class="custom-chroma-picker" hidden>
+        <p class="muted small">Select the chromas you want to enable.</p>
+        <div id="custom-chroma-buttons" class="buttons custom-chroma-buttons"></div>
       </div>
       <div id="chroma-buttons" class="buttons"></div>
     </section>

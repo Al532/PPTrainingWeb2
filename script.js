@@ -128,11 +128,13 @@ const chromaSetSelect = document.getElementById("chroma-set-select");
 const customChromaButton = document.getElementById("custom-chroma-button");
 const customChromaButtons = document.getElementById("custom-chroma-buttons");
 const customChromaPicker = document.getElementById("custom-chroma-picker");
+const customChromaRow = document.getElementById("custom-chroma-row");
 const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
 // const crypticToggle = document.getElementById("cryptic-toggle");
 const replayButton = document.getElementById("replay-button");
+const replayRow = document.getElementById("replay-row");
 
 let midiRange = { ...BASE_MIDI_RANGE };
 let reducedRangeEnabled = false;
@@ -170,14 +172,23 @@ let pendingPreparationToken = 0;
 let fadeTimeout = null;
 let statsPanelOpen = false;
 let currentTrial = null;
+let customButtonHome = customChromaRow;
 const audioFormats = {
   mp3: { label: "MP3", folder: "MP3", extension: "mp3" },
   wav: { label: "WAV", folder: "WAV", extension: "wav" },
 };
 
+function normalizeExerciseType(type = "") {
+  const trimmed = type.trim();
+  if (!trimmed) return "";
+  return trimmed.toLowerCase() === "custom" ? "Custom" : trimmed;
+}
+
 function getCurrentExerciseType() {
   return (
-    activeChromaSet?.exerciseType || getExerciseTypeFromLabel(activeChromaSet?.label)
+    normalizeExerciseType(
+      activeChromaSet?.exerciseType || getExerciseTypeFromLabel(activeChromaSet?.label)
+    )
   );
 }
 
@@ -426,7 +437,7 @@ function buildCustomChromaSet(selection = []) {
   return {
     label: `Custom: ${labelSuffix || "aucun chroma"}`,
     chromas: selectedChromas,
-    exerciseType: "custom",
+    exerciseType: "Custom",
   };
 }
 
@@ -469,7 +480,7 @@ function renderChromaSetOptions(selectedValue, { skipActivation = false } = {}) 
 
   chromaSetOptions.forEach((set, index) => {
     const option = document.createElement("option");
-    const isCustom = set.exerciseType === "custom";
+    const isCustom = normalizeExerciseType(set.exerciseType) === "Custom";
     option.value = isCustom ? CUSTOM_CHROMA_SET_VALUE : String(index);
     option.textContent = set.label;
     chromaSetSelect.appendChild(option);
@@ -606,6 +617,14 @@ function openCustomChromaPicker() {
   if (!customChromaPicker || !customChromaButton) return;
   isCustomSelectionOpen = true;
   customChromaPicker.hidden = false;
+  if (replayRow && customChromaButton) {
+    replayRow.hidden = false;
+    replayRow.innerHTML = "";
+    replayRow.appendChild(customChromaButton);
+  }
+  if (buttonsContainer) {
+    buttonsContainer.hidden = true;
+  }
   customChromaButton.textContent = "OK";
   pendingCustomSelection = new Set(customChromaSelection);
   renderCustomChromaButtons();
@@ -615,6 +634,19 @@ function closeCustomChromaPicker() {
   if (!customChromaPicker || !customChromaButton) return;
   isCustomSelectionOpen = false;
   customChromaPicker.hidden = true;
+  if (replayRow) {
+    replayRow.hidden = false;
+    replayRow.innerHTML = "";
+    if (replayButton) {
+      replayRow.appendChild(replayButton);
+    }
+  }
+  if (customButtonHome) {
+    customButtonHome.appendChild(customChromaButton);
+  }
+  if (buttonsContainer) {
+    buttonsContainer.hidden = false;
+  }
   customChromaButton.textContent = "Custom chroma set";
 }
 
@@ -632,6 +664,7 @@ function confirmCustomChromaSelection() {
 function setupCustomChromaButton() {
   if (!customChromaButton || !customChromaPicker || !customChromaButtons) return;
 
+  customButtonHome = customChromaButton.parentElement || customButtonHome;
   customChromaPicker.hidden = true;
   customChromaButton.addEventListener("click", () => {
     if (!isCustomSelectionOpen) {
@@ -737,7 +770,7 @@ async function startTrial(attempt = 0) {
     midiNote: trial.midiNote,
     instrument: trial.instrument,
     chromaSetLabel: activeChromaSet?.label ?? "",
-    exerciseType: activeChromaSet?.exerciseType ?? "",
+    exerciseType: normalizeExerciseType(activeChromaSet?.exerciseType ?? ""),
     awaitingGuess: true,
   };
   currentTrial = trial;
