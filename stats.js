@@ -68,12 +68,21 @@ export function getExerciseTypeFromLabel(label = "") {
   return knownTypes.find((type) => trimmedLabel.startsWith(type)) ?? "";
 }
 
+function normalizeExerciseType(exerciseType = "") {
+  const trimmed = exerciseType.trim();
+  if (!trimmed) return "";
+  return trimmed.toLowerCase() === "custom" ? "Custom" : trimmed;
+}
+
 export function getTrialsForExercise(exerciseType) {
   if (!exerciseType) return [];
 
+  const normalizedType = normalizeExerciseType(exerciseType);
   return trialLog.filter((entry) => {
-    const entryType = entry.exerciseType || getExerciseTypeFromLabel(entry.chromaSetLabel);
-    return entryType === exerciseType;
+    const entryType =
+      normalizeExerciseType(entry.exerciseType) ||
+      normalizeExerciseType(getExerciseTypeFromLabel(entry.chromaSetLabel));
+    return entryType === normalizedType;
   });
 }
 
@@ -106,7 +115,8 @@ export function renderStats({
     return;
   }
 
-  const entries = getTrialsForExercise(exerciseType);
+  const normalizedExerciseType = normalizeExerciseType(exerciseType);
+  const entries = getTrialsForExercise(normalizedExerciseType);
   const totalExerciseTrials = entries.length;
   const overallAccuracy = calculateAccuracy(entries);
   const recentEntries = entries.slice(-recentEntriesCount);
@@ -123,7 +133,7 @@ export function renderStats({
       <p><span class="muted">Total trials today:</span> ${totalTrialsToday}</p>
     </div>
     <div class="stats-block">
-      <div class="stats-heading">${exerciseType}</div>
+      <div class="stats-heading">${normalizedExerciseType}</div>
       <p><span class="muted">Total trials:</span> ${totalExerciseTrials}</p>
       <p><span class="muted">Overall accuracy:</span> ${overallDisplay}</p>
       <p><span class="muted">Last ${recentEntriesCount} trials accuracy:</span> ${recentDisplay}</p>
