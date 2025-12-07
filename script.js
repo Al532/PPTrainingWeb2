@@ -617,12 +617,14 @@ function openCustomChromaPicker() {
   if (!customChromaPicker || !customChromaButton) return;
   isCustomSelectionOpen = true;
   customChromaPicker.hidden = false;
+  resetTrialState();
   if (replayRow && customChromaButton) {
     replayRow.hidden = false;
     replayRow.innerHTML = "";
     replayRow.appendChild(customChromaButton);
   }
   if (buttonsContainer) {
+    buttonsContainer.innerHTML = "";
     buttonsContainer.hidden = true;
   }
   customChromaButton.textContent = "OK";
@@ -646,6 +648,7 @@ function closeCustomChromaPicker() {
   }
   if (buttonsContainer) {
     buttonsContainer.hidden = false;
+    showStartButton();
   }
   customChromaButton.textContent = "Custom chroma set";
 }
