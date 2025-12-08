@@ -178,6 +178,10 @@ const audioFormats = {
   wav: { label: "WAV", folder: "WAV", extension: "wav" },
 };
 
+const thirdsChromaSets = chromaSets.filter(
+  (set) => normalizeExerciseType(set.exerciseType) === "Thirds"
+);
+
 function normalizeExerciseType(type = "") {
   const trimmed = type.trim();
   if (!trimmed) return "";
@@ -305,21 +309,43 @@ function resetCrypticAssignments() {
   crypticButtonOrder = [];
 }
 
-function createButtons() {
-  if (!activeChromaSet) return;
+function isSpecialTonesMode() {
+  return normalizeExerciseType(activeChromaSet?.exerciseType) === "Special tones";
+}
+
+function findThirdsSetForChroma(chromaIndex) {
+  if (!Number.isInteger(chromaIndex)) return null;
+  return thirdsChromaSets.find((set) =>
+    set.chromas.some((chroma) => chroma.index === chromaIndex)
+  );
+}
+
+function getChromasForTrial(chromaIndex) {
+  if (isSpecialTonesMode()) {
+    const thirdsSet = findThirdsSetForChroma(chromaIndex);
+    if (thirdsSet?.chromas?.length) {
+      return thirdsSet.chromas;
+    }
+  }
+
+  return activeChromaSet?.chromas ?? [];
+}
+
+function createButtons(chromasForButtons = activeChromaSet?.chromas) {
+  if (!chromasForButtons?.length) return;
 
   // Cryptic mode disabled.
   resetCrypticAssignments();
 
   buttonsContainer.innerHTML = "";
   const chromaByIndex = new Map(
-    activeChromaSet.chromas.map((chroma) => [chroma.index, chroma])
+    chromasForButtons.map((chroma) => [chroma.index, chroma])
   );
 
   // const chromaOrder = crypticModeEnabled
   //   ? crypticButtonOrder
-  //   : activeChromaSet.chromas.map((chroma) => chroma.index);
-  const chromaOrder = activeChromaSet.chromas.map((chroma) => chroma.index);
+  //   : chromasForButtons.map((chroma) => chroma.index);
+  const chromaOrder = chromasForButtons.map((chroma) => chroma.index);
 
   chromaOrder.forEach((chromaIndex) => {
     const chroma = chromaByIndex.get(chromaIndex);
@@ -393,7 +419,6 @@ function resetTrialState() {
 }
 
 function handleStartClick() {
-  createButtons();
   startTrial();
 }
 
@@ -767,6 +792,9 @@ async function startTrial(attempt = 0) {
     updateReplayAvailability();
     return;
   }
+
+  const trialChromas = getChromasForTrial(trial.chromaIndex);
+  createButtons(trialChromas);
 
   currentState = {
     chromaIndex: trial.chromaIndex,

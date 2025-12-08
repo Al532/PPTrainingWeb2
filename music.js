@@ -56,6 +56,16 @@ const baseChromaSets = [
   { name: "Tones 1", exerciseType: "Tones", notes: ["C", "D", "E", "F♯", "A♭", "B♭"] },
   { name: "Tones 2", exerciseType: "Tones", notes: ["C♯", "E♭", "F", "G", "A", "B"] },
   {
+    name: "Special tones 1",
+    exerciseType: "Special tones",
+    notes: ["C", "D", "E", "F♯", "A♭", "B♭"],
+  },
+  {
+    name: "Special tones 2",
+    exerciseType: "Special tones",
+    notes: ["C♯", "E♭", "F", "G", "A", "B"],
+  },
+  {
     name: "Chromatic",
     exerciseType: "Chromatic",
     notes: chromas.map((chroma) => chroma.label),
@@ -63,9 +73,9 @@ const baseChromaSets = [
 ];
 
 export const chromaSets = baseChromaSets.map((set) => ({
+  ...set,
   label: `${set.name}: ${set.notes.join(", ")}`,
   chromas: set.notes.map((note) => ({ label: note, index: chromaLookup[note] })),
-  exerciseType: set.exerciseType,
 }));
 
 export const instruments = [
