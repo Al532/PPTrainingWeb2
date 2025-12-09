@@ -19,6 +19,7 @@ const NEXT_TRIAL_DELAY = 0;
 const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
 const CUSTOM_CHROMA_STORAGE_KEY = "ppt-custom-chromas";
 const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
+const REDUCED_RANGE_STORAGE_KEY = "ppt-reduced-range-enabled";
 const FADE_DURATION_MS = 100;
 const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
@@ -136,9 +137,9 @@ const reducedRangeToggle = document.getElementById("reduced-range-toggle");
 const replayButton = document.getElementById("replay-button");
 const replayRow = document.getElementById("replay-row");
 
-let midiRange = { ...BASE_MIDI_RANGE };
-let reducedRangeEnabled = false;
-let notesByChroma = buildNotesByChroma();
+let reducedRangeEnabled = loadSavedReducedRangeSetting();
+let midiRange = getRangeForSetting(reducedRangeEnabled);
+let notesByChroma = buildNotesByChroma(midiRange);
 const availabilityCache = new Map();
 const CUSTOM_CHROMA_SET_VALUE = "custom";
 let activeChromaSet = chromaSets[0];
@@ -279,6 +280,7 @@ function setupReducedRangeToggle() {
   reducedRangeToggle.checked = reducedRangeEnabled;
   reducedRangeToggle.addEventListener("change", (event) => {
     applyRangeSetting(event.target?.checked);
+    saveReducedRangeSetting(event.target?.checked);
   });
 }
 
@@ -490,6 +492,26 @@ function saveCustomChromaSelection(selection) {
     localStorage.setItem(CUSTOM_CHROMA_STORAGE_KEY, JSON.stringify(selection));
   } catch (error) {
     // Ignore storage errors; the selection just won't persist.
+  }
+}
+
+function loadSavedReducedRangeSetting() {
+  try {
+    const storedValue = localStorage.getItem(REDUCED_RANGE_STORAGE_KEY);
+    if (storedValue === "true") return true;
+    if (storedValue === "false") return false;
+  } catch (error) {
+    // Ignore storage errors and fall back to defaults.
+  }
+
+  return false;
+}
+
+function saveReducedRangeSetting(isReduced) {
+  try {
+    localStorage.setItem(REDUCED_RANGE_STORAGE_KEY, isReduced ? "true" : "false");
+  } catch (error) {
+    // Ignore storage errors; the setting just won't persist.
   }
 }
 
