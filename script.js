@@ -17,9 +17,11 @@ const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
 const LAST_CHROMA_SET_KEY = "ppt-last-chroma-set";
+const LAST_ANSWER_SET_KEY = "ppt-last-answer-set";
 const CUSTOM_CHROMA_STORAGE_KEY = "ppt-custom-chromas";
 const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
 const REDUCED_RANGE_STORAGE_KEY = "ppt-reduced-range-enabled";
+const RANDOMIZE_BUTTON_ORDER_KEY = "ppt-randomize-buttons";
 const FADE_DURATION_MS = 100;
 const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
@@ -122,10 +124,27 @@ const CRYPTIC_WORDS = [
   "zu",
 ];
 
+const ANSWER_SET_TYPES = [
+  "Auto",
+  "Tritones",
+  "Thirds",
+  "Minor thirds",
+  "Tones",
+];
+
+const ANSWER_SET_PRIORITY = [
+  "Chromatic",
+  "Tones",
+  "Minor thirds",
+  "Thirds",
+  "Tritones",
+];
+
 
 const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
 const chromaSetSelect = document.getElementById("chroma-set-select");
+const answerSetSelect = document.getElementById("answer-set-select");
 const customChromaButton = document.getElementById("custom-chroma-button");
 const customChromaButtons = document.getElementById("custom-chroma-buttons");
 const customChromaPicker = document.getElementById("custom-chroma-picker");
@@ -133,6 +152,7 @@ const customChromaRow = document.getElementById("custom-chroma-row");
 const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
+const randomizeButtonsToggle = document.getElementById("randomize-buttons-toggle");
 // const crypticToggle = document.getElementById("cryptic-toggle");
 const replayButton = document.getElementById("replay-button");
 const replayRow = document.getElementById("replay-row");
@@ -144,6 +164,8 @@ const availabilityCache = new Map();
 const CUSTOM_CHROMA_SET_VALUE = "custom";
 let activeChromaSet = chromaSets[0];
 let activeChromaSetValue = "0";
+let activeAnswerSet = loadSavedAnswerSet();
+let randomizeButtonsEnabled = loadSavedRandomizeButtonsSetting();
 let customChromaSelection = loadSavedCustomChromaSelection();
 let customChromaSet = buildCustomChromaSet(customChromaSelection);
 let isCustomSelectionOpen = false;
@@ -158,6 +180,7 @@ let currentState = {
   instrument: null,
   chromaSetLabel: "",
   exerciseType: "",
+  answerSet: "",
   awaitingGuess: false,
 };
 let feedbackResetTimeout = null;
@@ -195,6 +218,33 @@ function getCurrentExerciseType() {
       activeChromaSet?.exerciseType || getExerciseTypeFromLabel(activeChromaSet?.label)
     )
   );
+}
+
+function normalizeAnswerSetType(answerSet = "") {
+  const normalized = normalizeExerciseType(answerSet);
+  if (!normalized) return "";
+  return normalized === "Special tones" ? "Tones" : normalized;
+}
+
+function getAnswerSetPriorityValue(answerSet = "") {
+  const normalized = normalizeAnswerSetType(answerSet);
+  return ANSWER_SET_PRIORITY.findIndex((type) => type === normalized);
+}
+
+function getAvailableAnswerSetsForExercise(exerciseType = getCurrentExerciseType()) {
+  const priority = getAnswerSetPriorityValue(exerciseType);
+  if (priority < 0) {
+    return [...ANSWER_SET_TYPES];
+  }
+  return ANSWER_SET_TYPES.filter(
+    (type) => type === "Auto" || getAnswerSetPriorityValue(type) > priority
+  );
+}
+
+function getValidAnswerSetValue(value, exerciseType = getCurrentExerciseType()) {
+  const available = getAvailableAnswerSetsForExercise(exerciseType);
+  if (available.includes(value)) return value;
+  return "Auto";
 }
 
 const renderStats = () =>
@@ -284,6 +334,17 @@ function setupReducedRangeToggle() {
   });
 }
 
+function setupRandomizeButtonsToggle() {
+  if (!randomizeButtonsToggle) return;
+
+  randomizeButtonsToggle.checked = randomizeButtonsEnabled;
+  randomizeButtonsToggle.addEventListener("change", (event) => {
+    randomizeButtonsEnabled = Boolean(event.target?.checked);
+    saveRandomizeButtonsSetting(randomizeButtonsEnabled);
+    showStartButton();
+  });
+}
+
 // function setupCrypticToggle() {
 //   if (!crypticToggle) return;
 
@@ -322,7 +383,19 @@ function findThirdsSetForChroma(chromaIndex) {
   );
 }
 
-function getChromasForTrial(chromaIndex) {
+function findAnswerSetForChroma(chromaIndex, answerSetType) {
+  if (!Number.isInteger(chromaIndex)) return null;
+  const normalizedAnswerSet = normalizeAnswerSetType(answerSetType);
+  if (!normalizedAnswerSet) return null;
+
+  return chromaSets.find(
+    (set) =>
+      normalizeAnswerSetType(set.exerciseType) === normalizedAnswerSet &&
+      set.chromas.some((chroma) => chroma.index === chromaIndex)
+  );
+}
+
+function getDefaultAnswerChromasForTrial(chromaIndex) {
   if (isSpecialTonesMode()) {
     const thirdsSet = findThirdsSetForChroma(chromaIndex);
     if (thirdsSet?.chromas?.length) {
@@ -331,6 +404,20 @@ function getChromasForTrial(chromaIndex) {
   }
 
   return activeChromaSet?.chromas ?? [];
+}
+
+function getChromasForTrial(chromaIndex) {
+  const defaultChromas = getDefaultAnswerChromasForTrial(chromaIndex);
+  if (activeAnswerSet === "Auto") {
+    return defaultChromas;
+  }
+
+  const answerSetMatch = findAnswerSetForChroma(chromaIndex, activeAnswerSet);
+  if (answerSetMatch?.chromas?.length) {
+    return answerSetMatch.chromas;
+  }
+
+  return defaultChromas;
 }
 
 function createButtons(chromasForButtons = activeChromaSet?.chromas) {
@@ -347,7 +434,9 @@ function createButtons(chromasForButtons = activeChromaSet?.chromas) {
   // const chromaOrder = crypticModeEnabled
   //   ? crypticButtonOrder
   //   : chromasForButtons.map((chroma) => chroma.index);
-  const chromaOrder = chromasForButtons.map((chroma) => chroma.index);
+  const chromaOrder = randomizeButtonsEnabled
+    ? shuffleArray(chromasForButtons.map((chroma) => chroma.index))
+    : chromasForButtons.map((chroma) => chroma.index);
 
   chromaOrder.forEach((chromaIndex) => {
     const chroma = chromaByIndex.get(chromaIndex);
@@ -409,14 +498,15 @@ function resetTrialState() {
     feedbackResetTimeout = null;
   }
   resetButtonStates();
-  currentState = {
-    chromaIndex: null,
-    midiNote: null,
-    instrument: null,
-    chromaSetLabel: "",
-    exerciseType: "",
-    awaitingGuess: false,
-  };
+    currentState = {
+      chromaIndex: null,
+      midiNote: null,
+      instrument: null,
+      chromaSetLabel: "",
+      exerciseType: "",
+      answerSet: "",
+      awaitingGuess: false,
+    };
   clearPendingTrials();
 }
 
@@ -507,9 +597,29 @@ function loadSavedReducedRangeSetting() {
   return false;
 }
 
+function loadSavedRandomizeButtonsSetting() {
+  try {
+    const storedValue = localStorage.getItem(RANDOMIZE_BUTTON_ORDER_KEY);
+    if (storedValue === "true") return true;
+    if (storedValue === "false") return false;
+  } catch (error) {
+    // Ignore storage errors and fall back to defaults.
+  }
+
+  return false;
+}
+
 function saveReducedRangeSetting(isReduced) {
   try {
     localStorage.setItem(REDUCED_RANGE_STORAGE_KEY, isReduced ? "true" : "false");
+  } catch (error) {
+    // Ignore storage errors; the setting just won't persist.
+  }
+}
+
+function saveRandomizeButtonsSetting(isRandomized) {
+  try {
+    localStorage.setItem(RANDOMIZE_BUTTON_ORDER_KEY, isRandomized ? "true" : "false");
   } catch (error) {
     // Ignore storage errors; the setting just won't persist.
   }
@@ -539,11 +649,40 @@ function renderChromaSetOptions(selectedValue, { skipActivation = false } = {}) 
   }
 }
 
+function renderAnswerSetOptions({ selectedValue = activeAnswerSet, exerciseType } = {}) {
+  if (!answerSetSelect) return;
+  const effectiveExerciseType = exerciseType ?? getCurrentExerciseType();
+  const available = getAvailableAnswerSetsForExercise(effectiveExerciseType);
+  const resolvedValue = getValidAnswerSetValue(selectedValue, effectiveExerciseType);
+
+  answerSetSelect.innerHTML = "";
+  available.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    answerSetSelect.appendChild(option);
+  });
+
+  answerSetSelect.value = resolvedValue;
+  activeAnswerSet = resolvedValue;
+  saveAnswerSetSelection(resolvedValue);
+}
+
 function handleChromaSetChange(event) {
   if (isCustomSelectionOpen) {
     closeCustomChromaPicker();
   }
   setActiveChromaSetByValue(event.target.value);
+}
+
+function handleAnswerSetChange(event) {
+  const newValue = getValidAnswerSetValue(event.target.value);
+  activeAnswerSet = newValue;
+  if (answerSetSelect) {
+    answerSetSelect.value = newValue;
+  }
+  saveAnswerSetSelection(newValue);
+  showStartButton();
 }
 
 function getValidChromaSetValue(value) {
@@ -583,9 +722,30 @@ function loadSavedChromaSetValue() {
   return "0";
 }
 
+function loadSavedAnswerSet() {
+  try {
+    const storedValue = localStorage.getItem(LAST_ANSWER_SET_KEY);
+    if (storedValue && ANSWER_SET_TYPES.includes(storedValue)) {
+      return storedValue;
+    }
+  } catch (error) {
+    // Ignore storage errors and fall back to default.
+  }
+
+  return "Auto";
+}
+
 function saveChromaSetSelection(value) {
   try {
     localStorage.setItem(LAST_CHROMA_SET_KEY, String(value));
+  } catch (error) {
+    // Ignore storage errors; the selection just won't persist.
+  }
+}
+
+function saveAnswerSetSelection(value) {
+  try {
+    localStorage.setItem(LAST_ANSWER_SET_KEY, value);
   } catch (error) {
     // Ignore storage errors; the selection just won't persist.
   }
@@ -601,6 +761,7 @@ function setActiveChromaSetByValue(value, { skipSave = false } = {}) {
   if (chromaSetSelect) {
     chromaSetSelect.value = resolvedValue;
   }
+  renderAnswerSetOptions({ exerciseType: getCurrentExerciseType() });
   resetCrypticAssignments();
   if (!skipSave) {
     saveChromaSetSelection(resolvedValue);
@@ -613,6 +774,13 @@ function populateChromaSetSelect() {
   const savedValue = loadSavedChromaSetValue();
   renderChromaSetOptions(savedValue);
   chromaSetSelect.addEventListener("change", handleChromaSetChange);
+}
+
+function populateAnswerSetSelect() {
+  renderAnswerSetOptions();
+  if (answerSetSelect) {
+    answerSetSelect.addEventListener("change", handleAnswerSetChange);
+  }
 }
 
 function updateCustomChromaSet(selection, { shouldSelectCustom = true } = {}) {
@@ -824,6 +992,7 @@ async function startTrial(attempt = 0) {
     instrument: trial.instrument,
     chromaSetLabel: activeChromaSet?.label ?? "",
     exerciseType: normalizeExerciseType(activeChromaSet?.exerciseType ?? ""),
+    answerSet: activeAnswerSet,
     awaitingGuess: true,
   };
   currentTrial = trial;
@@ -982,6 +1151,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
       instrument: currentState.instrument,
       userSelectedChroma: getChromaLabelByIndex(chosenChroma),
       exerciseType: currentState.exerciseType || getCurrentExerciseType(),
+      answerSet: currentState.answerSet || activeAnswerSet,
       reducedRangeEnabled,
       isCorrect,
     },
@@ -1145,7 +1315,9 @@ function handleMidiMessage(message) {
 function init() {
   loadTrialLog(TRIAL_LOG_STORAGE_KEY);
   populateChromaSetSelect();
+  populateAnswerSetSelect();
   setupReducedRangeToggle();
+  setupRandomizeButtonsToggle();
   // setupCrypticToggle();
   setupCustomChromaButton();
   showStartButton();

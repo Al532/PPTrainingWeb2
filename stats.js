@@ -48,11 +48,17 @@ export function logTrialResult(entry, { storageKey }) {
 export function calculateAccuracy(entries) {
   if (!entries.length) return null;
 
-  const correctCount = entries.reduce(
+  const eligibleEntries = entries.filter(
+    (entry) => entry?.answerSet == null || entry.answerSet === "Auto"
+  );
+
+  if (!eligibleEntries.length) return null;
+
+  const correctCount = eligibleEntries.reduce(
     (count, entry) => (entry?.isCorrect ? count + 1 : count),
     0
   );
-  return Math.round((correctCount / entries.length) * 100);
+  return Math.round((correctCount / eligibleEntries.length) * 100);
 }
 
 export function getExerciseTypeFromLabel(label = "") {
@@ -119,10 +125,15 @@ export function renderStats({
   const normalizedExerciseType = normalizeExerciseType(exerciseType);
   const entries = getTrialsForExercise(normalizedExerciseType);
   const totalExerciseTrials = entries.length;
+  const eligibleEntries = entries.filter(
+    (entry) => entry?.answerSet == null || entry.answerSet === "Auto"
+  );
   const overallAccuracy = calculateAccuracy(entries);
-  const recentEntries = entries.slice(-recentEntriesCount);
+  const recentEligibleEntries = eligibleEntries.slice(-recentEntriesCount);
   const recentAccuracy =
-    recentEntries.length === recentEntriesCount ? calculateAccuracy(recentEntries) : null;
+    recentEligibleEntries.length === recentEntriesCount
+      ? calculateAccuracy(recentEligibleEntries)
+      : null;
 
   const overallDisplay = overallAccuracy == null ? "-" : `${overallAccuracy}%`;
   const recentDisplay = recentAccuracy == null ? "-" : `${recentAccuracy}%`;
