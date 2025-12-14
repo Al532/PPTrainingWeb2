@@ -67,7 +67,6 @@ export function getExerciseTypeFromLabel(label = "") {
     "Thirds",
     "Minor thirds",
     "Tones",
-    "Special tones",
     "Chromatic",
   ];
 

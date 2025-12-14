@@ -202,10 +202,6 @@ const audioFormats = {
   wav: { label: "WAV", folder: "WAV", extension: "wav" },
 };
 
-const thirdsChromaSets = chromaSets.filter(
-  (set) => normalizeExerciseType(set.exerciseType) === "Thirds"
-);
-
 function normalizeExerciseType(type = "") {
   const trimmed = type.trim();
   if (!trimmed) return "";
@@ -223,7 +219,7 @@ function getCurrentExerciseType() {
 function normalizeAnswerSetType(answerSet = "") {
   const normalized = normalizeExerciseType(answerSet);
   if (!normalized) return "";
-  return normalized === "Special tones" ? "Tones" : normalized;
+  return normalized;
 }
 
 function getAnswerSetPriorityValue(answerSet = "") {
@@ -341,7 +337,7 @@ function setupRandomizeButtonsToggle() {
   randomizeButtonsToggle.addEventListener("change", (event) => {
     randomizeButtonsEnabled = Boolean(event.target?.checked);
     saveRandomizeButtonsSetting(randomizeButtonsEnabled);
-    showStartButton();
+    refreshButtonOrder();
   });
 }
 
@@ -372,17 +368,6 @@ function resetCrypticAssignments() {
   crypticButtonOrder = [];
 }
 
-function isSpecialTonesMode() {
-  return normalizeExerciseType(activeChromaSet?.exerciseType) === "Special tones";
-}
-
-function findThirdsSetForChroma(chromaIndex) {
-  if (!Number.isInteger(chromaIndex)) return null;
-  return thirdsChromaSets.find((set) =>
-    set.chromas.some((chroma) => chroma.index === chromaIndex)
-  );
-}
-
 function findAnswerSetForChroma(chromaIndex, answerSetType) {
   if (!Number.isInteger(chromaIndex)) return null;
   const normalizedAnswerSet = normalizeAnswerSetType(answerSetType);
@@ -396,13 +381,6 @@ function findAnswerSetForChroma(chromaIndex, answerSetType) {
 }
 
 function getDefaultAnswerChromasForTrial(chromaIndex) {
-  if (isSpecialTonesMode()) {
-    const thirdsSet = findThirdsSetForChroma(chromaIndex);
-    if (thirdsSet?.chromas?.length) {
-      return thirdsSet.chromas;
-    }
-  }
-
   return activeChromaSet?.chromas ?? [];
 }
 
@@ -498,16 +476,23 @@ function resetTrialState() {
     feedbackResetTimeout = null;
   }
   resetButtonStates();
-    currentState = {
-      chromaIndex: null,
-      midiNote: null,
-      instrument: null,
-      chromaSetLabel: "",
-      exerciseType: "",
-      answerSet: "",
-      awaitingGuess: false,
-    };
+  currentState = {
+    chromaIndex: null,
+    midiNote: null,
+    instrument: null,
+    chromaSetLabel: "",
+    exerciseType: "",
+    answerSet: "",
+    awaitingGuess: false,
+  };
   clearPendingTrials();
+}
+
+function refreshButtonOrder() {
+  if (!currentState.awaitingGuess || currentState.chromaIndex == null) return;
+
+  const chromasForButtons = getChromasForTrial(currentState.chromaIndex);
+  createButtons(chromasForButtons);
 }
 
 function handleStartClick() {
