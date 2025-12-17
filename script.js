@@ -22,6 +22,7 @@ const CUSTOM_CHROMA_STORAGE_KEY = "ppt-custom-chromas";
 const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
 const REDUCED_RANGE_STORAGE_KEY = "ppt-reduced-range-enabled";
 const RANDOMIZE_BUTTON_ORDER_KEY = "ppt-randomize-buttons";
+const RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL = 20;
 const FADE_DURATION_MS = 100;
 const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
@@ -166,6 +167,8 @@ let activeChromaSet = chromaSets[0];
 let activeChromaSetValue = "0";
 let activeAnswerSet = loadSavedAnswerSet();
 let randomizeButtonsEnabled = loadSavedRandomizeButtonsSetting();
+let randomizedButtonOrder = [];
+let randomizedButtonOrderTrialCount = 0;
 let customChromaSelection = loadSavedCustomChromaSelection();
 let customChromaSet = buildCustomChromaSet(customChromaSelection);
 let isCustomSelectionOpen = false;
@@ -337,6 +340,7 @@ function setupRandomizeButtonsToggle() {
   randomizeButtonsToggle.addEventListener("change", (event) => {
     randomizeButtonsEnabled = Boolean(event.target?.checked);
     saveRandomizeButtonsSetting(randomizeButtonsEnabled);
+    resetRandomizedButtonOrder();
     refreshButtonOrder();
   });
 }
@@ -361,6 +365,35 @@ function shuffleArray(values = []) {
     [array[i], array[j]] = [array[j], array[i]];
   }
   return array;
+}
+
+function resetRandomizedButtonOrder() {
+  randomizedButtonOrder = [];
+  randomizedButtonOrderTrialCount = 0;
+}
+
+function getChromaOrderForButtons(chromasForButtons = []) {
+  if (!randomizeButtonsEnabled) {
+    return chromasForButtons.map((chroma) => chroma.index);
+  }
+
+  const chromaIndices = chromasForButtons.map((chroma) => chroma.index);
+  const hasSameChromas =
+    randomizedButtonOrder.length === chromaIndices.length &&
+    chromaIndices.every((index) => randomizedButtonOrder.includes(index));
+
+  const shouldReroll =
+    !randomizedButtonOrder.length ||
+    randomizedButtonOrderTrialCount >= RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL ||
+    !hasSameChromas;
+
+  if (shouldReroll) {
+    randomizedButtonOrder = shuffleArray(chromaIndices);
+    randomizedButtonOrderTrialCount = 0;
+  }
+
+  randomizedButtonOrderTrialCount += 1;
+  return randomizedButtonOrder;
 }
 
 function resetCrypticAssignments() {
@@ -412,9 +445,7 @@ function createButtons(chromasForButtons = activeChromaSet?.chromas) {
   // const chromaOrder = crypticModeEnabled
   //   ? crypticButtonOrder
   //   : chromasForButtons.map((chroma) => chroma.index);
-  const chromaOrder = randomizeButtonsEnabled
-    ? shuffleArray(chromasForButtons.map((chroma) => chroma.index))
-    : chromasForButtons.map((chroma) => chroma.index);
+  const chromaOrder = getChromaOrderForButtons(chromasForButtons);
 
   chromaOrder.forEach((chromaIndex) => {
     const chroma = chromaByIndex.get(chromaIndex);
@@ -434,6 +465,7 @@ function createButtons(chromasForButtons = activeChromaSet?.chromas) {
 
 function showStartButton() {
   resetTrialState();
+  resetRandomizedButtonOrder();
 
   buttonsContainer.innerHTML = "";
   const btn = document.createElement("button");
