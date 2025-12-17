@@ -177,6 +177,7 @@ let audioFormat = DEFAULT_AUDIO_FORMAT;
 let crypticModeEnabled = false;
 let crypticAssignments = new Map();
 let crypticButtonOrder = [];
+let lastClickedChromaIndex = null;
 let currentState = {
   chromaIndex: null,
   midiNote: null,
@@ -367,6 +368,45 @@ function shuffleArray(values = []) {
   return array;
 }
 
+function shuffleArrayWithLastClickedGuard(
+  values = [],
+  previousOrder = [],
+  lastClickedIndex = null
+) {
+  if (!previousOrder?.length || values.length <= 1 || !Number.isInteger(lastClickedIndex)) {
+    return shuffleArray(values);
+  }
+
+  const previousIndex = previousOrder.indexOf(lastClickedIndex);
+  if (previousIndex === -1) {
+    return shuffleArray(values);
+  }
+
+  const maxAttempts = 20;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const shuffled = shuffleArray(values);
+    if (shuffled[previousIndex] !== lastClickedIndex) {
+      return shuffled;
+    }
+  }
+
+  const shuffled = shuffleArray(values);
+  if (shuffled[previousIndex] === lastClickedIndex) {
+    const swapIndex = shuffled.findIndex(
+      (value, idx) => value !== lastClickedIndex && idx !== previousIndex
+    );
+
+    if (swapIndex !== -1) {
+      [shuffled[swapIndex], shuffled[previousIndex]] = [
+        shuffled[previousIndex],
+        shuffled[swapIndex],
+      ];
+    }
+  }
+
+  return shuffled;
+}
+
 function resetRandomizedButtonOrder() {
   randomizedButtonOrder = [];
   randomizedButtonOrderTrialCount = 0;
@@ -388,7 +428,12 @@ function getChromaOrderForButtons(chromasForButtons = []) {
     !hasSameChromas;
 
   if (shouldReroll) {
-    randomizedButtonOrder = shuffleArray(chromaIndices);
+    const previousOrder = [...randomizedButtonOrder];
+    randomizedButtonOrder = shuffleArrayWithLastClickedGuard(
+      chromaIndices,
+      previousOrder,
+      lastClickedChromaIndex
+    );
     randomizedButtonOrderTrialCount = 0;
   }
 
@@ -1149,6 +1194,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
   if (!currentState.awaitingGuess) return;
 
   currentState.awaitingGuess = false;
+  lastClickedChromaIndex = chosenChroma;
   currentTrial = null;
   if (feedbackResetTimeout) {
     clearTimeout(feedbackResetTimeout);
