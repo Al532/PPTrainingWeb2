@@ -23,6 +23,7 @@ const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
 const REDUCED_RANGE_STORAGE_KEY = "ppt-reduced-range-enabled";
 const RANDOMIZE_BUTTON_ORDER_KEY = "ppt-randomize-buttons";
 const MAJOR_CHORDS_STORAGE_KEY = "ppt-major-chords-enabled";
+const MAJOR_CHORD_VOLUME_REDUCTION_DB = -4.7;
 const RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL = 5;
 const FADE_DURATION_MS = 100;
 const RECENT_ENTRIES = 1000;
@@ -1162,6 +1163,11 @@ function stopCurrentAudio() {
   currentAudioGainNodes = [];
 }
 
+function getMajorChordGainMultiplier() {
+  if (!majorChordsEnabled) return 1;
+  return Math.pow(10, MAJOR_CHORD_VOLUME_REDUCTION_DB / 20);
+}
+
 function getAudioElementsForTrial(trial) {
   const elements = trial?.audioElements ?? [];
   if (elements.length) {
@@ -1200,11 +1206,12 @@ function playPreparedTrial(trial) {
   const context = getAudioContext();
   currentAudioGainNodes = [];
   if (context) {
+    const gainMultiplier = getMajorChordGainMultiplier();
     audioElements.forEach((audio) => {
       const source = context.createMediaElementSource(audio);
       const gainNode = context.createGain();
 
-      gainNode.gain.setValueAtTime(1, context.currentTime);
+      gainNode.gain.setValueAtTime(gainMultiplier, context.currentTime);
       source.connect(gainNode).connect(context.destination);
 
       currentAudioGainNodes.push(gainNode);
