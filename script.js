@@ -22,10 +22,12 @@ const CUSTOM_CHROMA_STORAGE_KEY = "ppt-custom-chromas";
 const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
 const REDUCED_RANGE_STORAGE_KEY = "ppt-reduced-range-enabled";
 const RANDOMIZE_BUTTON_ORDER_KEY = "ppt-randomize-buttons";
+const MAJOR_CHORDS_STORAGE_KEY = "ppt-major-chords-enabled";
 const RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL = 5;
 const FADE_DURATION_MS = 100;
 const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
+const MAJOR_CHORD_TARGET_RANGE = { min: 48, max: 71 };
 // Toggle between "mp3" or "wav" to switch the asset set without exposing UI controls.
 const DEFAULT_AUDIO_FORMAT = "mp3";
 const CRYPTIC_WORDS = [
@@ -154,13 +156,15 @@ const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
 const randomizeButtonsToggle = document.getElementById("randomize-buttons-toggle");
+const majorChordsToggle = document.getElementById("major-chords-toggle");
 // const crypticToggle = document.getElementById("cryptic-toggle");
 const replayButton = document.getElementById("replay-button");
 const replayRow = document.getElementById("replay-row");
 
 let reducedRangeEnabled = loadSavedReducedRangeSetting();
 let midiRange = getRangeForSetting(reducedRangeEnabled);
-let notesByChroma = buildNotesByChroma(midiRange);
+let majorChordsEnabled = loadSavedMajorChordsSetting();
+let notesByChroma = buildNotesByChroma(getTargetRange());
 const availabilityCache = new Map();
 const CUSTOM_CHROMA_SET_VALUE = "custom";
 let activeChromaSet = chromaSets[0];
@@ -188,8 +192,8 @@ let currentState = {
   awaitingGuess: false,
 };
 let feedbackResetTimeout = null;
-let currentAudio = null;
-let currentAudioGainNode = null;
+let currentAudioElements = [];
+let currentAudioGainNodes = [];
 let nextTrialTimeout = null;
 let lastMidiNotePlayed = null;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -304,6 +308,23 @@ function buildNotesByChroma(range = midiRange) {
   return buckets;
 }
 
+function getTargetRange() {
+  if (!majorChordsEnabled) {
+    return { ...midiRange };
+  }
+
+  const min = Math.max(midiRange.min, MAJOR_CHORD_TARGET_RANGE.min);
+  const max = Math.min(midiRange.max, MAJOR_CHORD_TARGET_RANGE.max);
+  if (min > max) {
+    return { ...midiRange };
+  }
+  return { min, max };
+}
+
+function refreshNotesByChroma() {
+  notesByChroma = buildNotesByChroma(getTargetRange());
+}
+
 function getRangeForSetting(isReduced) {
   if (!isReduced) {
     return { ...BASE_MIDI_RANGE };
@@ -318,7 +339,7 @@ function getRangeForSetting(isReduced) {
 function applyRangeSetting(isReduced) {
   reducedRangeEnabled = Boolean(isReduced);
   midiRange = getRangeForSetting(reducedRangeEnabled);
-  notesByChroma = buildNotesByChroma(midiRange);
+  refreshNotesByChroma();
   lastMidiNotePlayed = null;
   showStartButton();
   refreshStatsIfOpen();
@@ -343,6 +364,19 @@ function setupRandomizeButtonsToggle() {
     saveRandomizeButtonsSetting(randomizeButtonsEnabled);
     resetRandomizedButtonOrder();
     refreshButtonOrder();
+  });
+}
+
+function setupMajorChordsToggle() {
+  if (!majorChordsToggle) return;
+
+  majorChordsToggle.checked = majorChordsEnabled;
+  majorChordsToggle.addEventListener("change", (event) => {
+    majorChordsEnabled = Boolean(event.target?.checked);
+    saveMajorChordsSetting(majorChordsEnabled);
+    refreshNotesByChroma();
+    lastMidiNotePlayed = null;
+    showStartButton();
   });
 }
 
@@ -671,6 +705,18 @@ function loadSavedRandomizeButtonsSetting() {
   return false;
 }
 
+function loadSavedMajorChordsSetting() {
+  try {
+    const storedValue = localStorage.getItem(MAJOR_CHORDS_STORAGE_KEY);
+    if (storedValue === "true") return true;
+    if (storedValue === "false") return false;
+  } catch (error) {
+    // Ignore storage errors and fall back to defaults.
+  }
+
+  return false;
+}
+
 function saveReducedRangeSetting(isReduced) {
   try {
     localStorage.setItem(REDUCED_RANGE_STORAGE_KEY, isReduced ? "true" : "false");
@@ -682,6 +728,14 @@ function saveReducedRangeSetting(isReduced) {
 function saveRandomizeButtonsSetting(isRandomized) {
   try {
     localStorage.setItem(RANDOMIZE_BUTTON_ORDER_KEY, isRandomized ? "true" : "false");
+  } catch (error) {
+    // Ignore storage errors; the setting just won't persist.
+  }
+}
+
+function saveMajorChordsSetting(isEnabled) {
+  try {
+    localStorage.setItem(MAJOR_CHORDS_STORAGE_KEY, isEnabled ? "true" : "false");
   } catch (error) {
     // Ignore storage errors; the setting just won't persist.
   }
@@ -1006,10 +1060,42 @@ function pickRandomChroma() {
 
 function pickRandomNote(chromaIndex, excludedMidiNote) {
   const notes = notesByChroma[chromaIndex];
+  if (!notes?.length) return null;
   const pool = notes.filter((note) => note !== excludedMidiNote);
   const source = pool.length ? pool : notes;
   const idx = Math.floor(Math.random() * source.length);
   return source[idx];
+}
+
+async function findClosestAvailableNote(instrument, midiNote) {
+  const range = instrumentRanges[instrument] ?? { min: 0, max: 127 };
+  const minOffset = Math.ceil(Math.max(range.min - midiNote, 0) / 12);
+  const maxOffset = Math.ceil(Math.max(midiNote - range.max, 0) / 12);
+  const maxSteps = Math.max(minOffset, maxOffset, 8);
+
+  for (let offset = 0; offset <= maxSteps; offset += 1) {
+    const candidates =
+      offset === 0
+        ? [midiNote]
+        : [midiNote - offset * 12, midiNote + offset * 12];
+    for (const candidate of candidates) {
+      if (candidate < range.min || candidate > range.max) continue;
+      if (await checkSampleExists(instrument, candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function getMajorChordNotes(instrument, midiNote) {
+  const intervals = [0, 4, 7];
+  const resolved = await Promise.all(
+    intervals.map((interval) => findClosestAvailableNote(instrument, midiNote + interval))
+  );
+  if (resolved.some((note) => note == null)) return null;
+  return resolved;
 }
 
 async function startTrial(attempt = 0) {
@@ -1066,61 +1152,74 @@ async function startTrial(attempt = 0) {
 
 function stopCurrentAudio() {
   cancelScheduledFade();
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio.currentTime = 0;
-    currentAudio = null;
-  }
+  currentAudioElements.forEach((audio) => {
+    audio.pause();
+    audio.currentTime = 0;
+  });
+  currentAudioElements = [];
 
-  if (currentAudioGainNode) {
-    currentAudioGainNode.disconnect();
-    currentAudioGainNode = null;
-  }
+  currentAudioGainNodes.forEach((gainNode) => gainNode.disconnect());
+  currentAudioGainNodes = [];
 }
 
-function getAudioElementForTrial(trial) {
-  if (trial?.audioElement) {
-    try {
-      const clone = trial.audioElement.cloneNode(true);
-      clone.currentTime = 0;
-      return clone;
-    } catch (error) {
-      // Ignore clone errors and fall back to a fresh audio element.
+function getAudioElementsForTrial(trial) {
+  const elements = trial?.audioElements ?? [];
+  if (elements.length) {
+    const clones = elements
+      .map((element) => {
+        try {
+          const clone = element.cloneNode(true);
+          clone.currentTime = 0;
+          return clone;
+        } catch (error) {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    if (clones.length === elements.length) {
+      return clones;
     }
   }
 
-  const audio = new Audio(getAudioSrc(trial.instrument, trial.midiNote));
-  audio.preload = "auto";
-  return audio;
+  return trial?.midiNotes?.map((note) => {
+    const audio = new Audio(getAudioSrc(trial.instrument, note));
+    audio.preload = "auto";
+    return audio;
+  }) ?? [];
 }
 
 function playPreparedTrial(trial) {
-  const { instrument, midiNote } = trial;
-  const audio = getAudioElementForTrial(trial);
-  if (!audio) return;
+  const { instrument, midiNotes = [trial?.midiNote] } = trial;
+  if (!instrument || !midiNotes.length) return;
+  const audioElements = getAudioElementsForTrial(trial);
+  if (!audioElements.length) return;
 
   stopCurrentAudio();
 
   const context = getAudioContext();
+  currentAudioGainNodes = [];
   if (context) {
-    const source = context.createMediaElementSource(audio);
-    const gainNode = context.createGain();
+    audioElements.forEach((audio) => {
+      const source = context.createMediaElementSource(audio);
+      const gainNode = context.createGain();
 
-    gainNode.gain.setValueAtTime(1, context.currentTime);
-    source.connect(gainNode).connect(context.destination);
+      gainNode.gain.setValueAtTime(1, context.currentTime);
+      source.connect(gainNode).connect(context.destination);
 
-    currentAudioGainNode = gainNode;
-  } else {
-    currentAudioGainNode = null;
+      currentAudioGainNodes.push(gainNode);
+    });
   }
 
-  currentAudio = audio;
+  currentAudioElements = audioElements;
 
-  audio
-    .play()
-    .catch(() => {
-      // Fail silently to avoid on-screen feedback.
-    });
+  audioElements.forEach((audio) => {
+    audio
+      .play()
+      .catch(() => {
+        // Fail silently to avoid on-screen feedback.
+      });
+  });
 }
 
 function replayCurrentTrial() {
@@ -1135,16 +1234,16 @@ function handleReplayClick() {
 
 function fadeOutCurrentAudio() {
   cancelScheduledFade();
-  const audio = currentAudio;
-  const gainNode = currentAudioGainNode;
-  if (!audio) return;
+  const audioElements = currentAudioElements;
+  const gainNodes = currentAudioGainNodes;
+  if (!audioElements.length) return;
 
-  if (!gainNode) {
-    audio.pause();
-    audio.currentTime = 0;
-    if (currentAudio === audio) {
-      currentAudio = null;
-    }
+  if (!gainNodes.length) {
+    audioElements.forEach((audio) => {
+      audio.pause();
+      audio.currentTime = 0;
+    });
+    currentAudioElements = [];
     return;
   }
 
@@ -1152,17 +1251,21 @@ function fadeOutCurrentAudio() {
   const fadeDurationSeconds = FADE_DURATION_MS / 1000;
   const now = context.currentTime;
 
-  gainNode.gain.cancelScheduledValues(now);
-  gainNode.gain.setValueAtTime(gainNode.gain.value, now);
-  gainNode.gain.linearRampToValueAtTime(0, now + fadeDurationSeconds);
+  gainNodes.forEach((gainNode) => {
+    gainNode.gain.cancelScheduledValues(now);
+    gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+    gainNode.gain.linearRampToValueAtTime(0, now + fadeDurationSeconds);
+  });
 
   const cleanup = () => {
-    audio.pause();
-    audio.currentTime = 0;
-    gainNode.disconnect();
-    if (currentAudio === audio) {
-      currentAudio = null;
-      currentAudioGainNode = null;
+    audioElements.forEach((audio) => {
+      audio.pause();
+      audio.currentTime = 0;
+    });
+    gainNodes.forEach((gainNode) => gainNode.disconnect());
+    if (currentAudioElements === audioElements) {
+      currentAudioElements = [];
+      currentAudioGainNodes = [];
     }
   };
 
@@ -1177,7 +1280,7 @@ function cancelScheduledFade() {
 }
 
 function scheduleAudioFade(feedbackDuration) {
-  if (!currentAudio) return;
+  if (!currentAudioElements.length) return;
 
   cancelScheduledFade();
 
@@ -1304,18 +1407,42 @@ async function findPlayableTrial(attempt = 0, excludedMidiNote = null) {
   if (chromaIndex === null) return null;
 
   const midiNote = pickRandomNote(chromaIndex, excludedMidiNote);
+  if (midiNote == null) {
+    return findPlayableTrial(attempt + 1, excludedMidiNote);
+  }
   const instrument = await pickInstrumentForNote(midiNote);
 
   if (!instrument) {
     return findPlayableTrial(attempt + 1, excludedMidiNote);
   }
 
-  const audioElement = await prepareAudioElement(instrument, midiNote);
-  if (!audioElement) {
+  const midiNotes = majorChordsEnabled
+    ? await getMajorChordNotes(instrument, midiNote)
+    : [midiNote];
+  if (!midiNotes) {
     return findPlayableTrial(attempt + 1, excludedMidiNote);
   }
 
-  return { chromaIndex, midiNote, instrument, audioElement };
+  const audioElements = await prepareAudioElements(instrument, midiNotes);
+  if (!audioElements) {
+    return findPlayableTrial(attempt + 1, excludedMidiNote);
+  }
+
+  return {
+    chromaIndex,
+    midiNote,
+    midiNotes,
+    instrument,
+    audioElements,
+  };
+}
+
+async function prepareAudioElements(instrument, midiNotes) {
+  const elements = await Promise.all(
+    midiNotes.map((note) => prepareAudioElement(instrument, note))
+  );
+  if (elements.some((element) => !element)) return null;
+  return elements;
 }
 
 async function prepareAudioElement(instrument, midiNote) {
@@ -1381,6 +1508,7 @@ function init() {
   populateAnswerSetSelect();
   setupReducedRangeToggle();
   setupRandomizeButtonsToggle();
+  setupMajorChordsToggle();
   // setupCrypticToggle();
   setupCustomChromaButton();
   showStartButton();
