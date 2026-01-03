@@ -1216,7 +1216,7 @@ function scheduleAudioFade(feedbackDuration) {
 
 function playLimitedFeedbackSound() {
   return new Promise((resolve) => {
-    const audio = new Audio("feedback.mp3");
+    const audio = new Audio("assets/feedback.mp3");
     const cleanup = () => resolve();
     audio.addEventListener("ended", cleanup, { once: true });
     audio.addEventListener("error", cleanup, { once: true });
