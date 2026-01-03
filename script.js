@@ -348,16 +348,11 @@ function setupRandomizeButtonsToggle() {
   });
 }
 
-function updateFeedbackToggleLabel() {
-  if (!feedbackToggle) return;
-  feedbackToggle.textContent = limitedFeedbackEnabled
-    ? "Normal feedback"
-    : "Limited feedback";
-}
-
 function setLimitedFeedbackEnabled(isEnabled) {
   limitedFeedbackEnabled = Boolean(isEnabled);
-  updateFeedbackToggleLabel();
+  if (feedbackToggle) {
+    feedbackToggle.checked = limitedFeedbackEnabled;
+  }
   if (limitedFeedbackEnabled) {
     resetButtonStates();
   }
@@ -365,9 +360,9 @@ function setLimitedFeedbackEnabled(isEnabled) {
 
 function setupFeedbackToggle() {
   if (!feedbackToggle) return;
-  updateFeedbackToggleLabel();
-  feedbackToggle.addEventListener("click", () => {
-    setLimitedFeedbackEnabled(!limitedFeedbackEnabled);
+  feedbackToggle.checked = limitedFeedbackEnabled;
+  feedbackToggle.addEventListener("change", (event) => {
+    setLimitedFeedbackEnabled(event.target?.checked);
   });
 }
 
@@ -1258,6 +1253,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
       exerciseType: currentState.exerciseType || getCurrentExerciseType(),
       answerSet: currentState.answerSet || activeAnswerSet,
       reducedRangeEnabled,
+      "Limited feedback": limitedFeedbackEnabled,
       isCorrect,
     },
     { storageKey: TRIAL_LOG_STORAGE_KEY }
@@ -1290,15 +1286,11 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     return;
   }
 
-  if (isCorrect) {
-    scheduleNextTrial(feedbackDuration);
-    return;
+  if (!isCorrect) {
+    playLimitedFeedbackSound();
   }
 
-  cancelNextTrialTimeout();
-  playLimitedFeedbackSound().finally(() => {
-    scheduleNextTrial(0);
-  });
+  scheduleNextTrial(feedbackDuration);
 }
 
 function cancelNextTrialTimeout() {
