@@ -154,6 +154,7 @@ const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
 const randomizeButtonsToggle = document.getElementById("randomize-buttons-toggle");
+const feedbackToggle = document.getElementById("feedback-toggle");
 // const crypticToggle = document.getElementById("cryptic-toggle");
 const replayButton = document.getElementById("replay-button");
 const replayRow = document.getElementById("replay-row");
@@ -178,6 +179,7 @@ let crypticModeEnabled = false;
 let crypticAssignments = new Map();
 let crypticButtonOrder = [];
 let lastClickedChromaIndex = null;
+let limitedFeedbackEnabled = false;
 let currentState = {
   chromaIndex: null,
   midiNote: null,
@@ -343,6 +345,29 @@ function setupRandomizeButtonsToggle() {
     saveRandomizeButtonsSetting(randomizeButtonsEnabled);
     resetRandomizedButtonOrder();
     refreshButtonOrder();
+  });
+}
+
+function updateFeedbackToggleLabel() {
+  if (!feedbackToggle) return;
+  feedbackToggle.textContent = limitedFeedbackEnabled
+    ? "Normal feedback"
+    : "Limited feedback";
+}
+
+function setLimitedFeedbackEnabled(isEnabled) {
+  limitedFeedbackEnabled = Boolean(isEnabled);
+  updateFeedbackToggleLabel();
+  if (limitedFeedbackEnabled) {
+    resetButtonStates();
+  }
+}
+
+function setupFeedbackToggle() {
+  if (!feedbackToggle) return;
+  updateFeedbackToggleLabel();
+  feedbackToggle.addEventListener("click", () => {
+    setLimitedFeedbackEnabled(!limitedFeedbackEnabled);
   });
 }
 
@@ -1189,6 +1214,23 @@ function scheduleAudioFade(feedbackDuration) {
   }, fadeDelay);
 }
 
+function playLimitedFeedbackSound() {
+  return new Promise((resolve) => {
+    const audio = new Audio("feedback.mp3");
+    const cleanup = () => resolve();
+    audio.addEventListener("ended", cleanup, { once: true });
+    audio.addEventListener("error", cleanup, { once: true });
+    audio
+      .play()
+      .then(() => {
+        // Playback started; wait for ended event.
+      })
+      .catch(() => {
+        cleanup();
+      });
+  });
+}
+
 function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
 
   if (!currentState.awaitingGuess) return;
@@ -1223,11 +1265,13 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
 
   refreshStatsIfOpen();
 
-  if (isCorrect) {
-    chosenButton?.classList.add("correct");
-  } else {
-    chosenButton?.classList.add("incorrect");
-    correctButton?.classList.add("correct");
+  if (!limitedFeedbackEnabled) {
+    if (isCorrect) {
+      chosenButton?.classList.add("correct");
+    } else {
+      chosenButton?.classList.add("incorrect");
+      correctButton?.classList.add("correct");
+    }
   }
 
   const feedbackDuration = isCorrect
@@ -1239,8 +1283,22 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
   }
 
   preparePendingTrial();
-  scheduleFeedbackReset(feedbackDuration);
-  scheduleNextTrial(feedbackDuration);
+
+  if (!limitedFeedbackEnabled) {
+    scheduleFeedbackReset(feedbackDuration);
+    scheduleNextTrial(feedbackDuration);
+    return;
+  }
+
+  if (isCorrect) {
+    scheduleNextTrial(feedbackDuration);
+    return;
+  }
+
+  cancelNextTrialTimeout();
+  playLimitedFeedbackSound().finally(() => {
+    scheduleNextTrial(0);
+  });
 }
 
 function cancelNextTrialTimeout() {
@@ -1381,6 +1439,7 @@ function init() {
   populateAnswerSetSelect();
   setupReducedRangeToggle();
   setupRandomizeButtonsToggle();
+  setupFeedbackToggle();
   // setupCrypticToggle();
   setupCustomChromaButton();
   showStartButton();
