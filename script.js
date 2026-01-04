@@ -27,9 +27,11 @@ const FADE_DURATION_MS = 100;
 const DRONE_CROSSFADE_START_MS = 2000;
 const DRONE_CROSSFADE_DURATION_MS = 300;
 const DRONE_RESTART_OFFSET_MS = 150;
+const DRONE_MIDI_START = 48;
+const DRONE_MIDI_END = 59;
+const DRONE_AUDIO_EXTENSION = "mp3";
 const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
-const DRONE_AUDIO_SRC = "assets/Drones/48.mp3";
 // Toggle between "mp3" or "wav" to switch the asset set without exposing UI controls.
 const DEFAULT_AUDIO_FORMAT = "mp3";
 const CRYPTIC_WORDS = [
@@ -150,6 +152,7 @@ const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
 const chromaSetSelect = document.getElementById("chroma-set-select");
 const answerSetSelect = document.getElementById("answer-set-select");
+const droneCountSelect = document.getElementById("drone-count-select");
 const customChromaButton = document.getElementById("custom-chroma-button");
 const customChromaButtons = document.getElementById("custom-chroma-buttons");
 const customChromaPicker = document.getElementById("custom-chroma-picker");
@@ -184,6 +187,8 @@ let crypticAssignments = new Map();
 let crypticButtonOrder = [];
 let lastClickedChromaIndex = null;
 let limitedFeedbackEnabled = false;
+let selectedDroneCount = 0;
+let dronePlayers = [];
 let currentState = {
   chromaIndex: null,
   midiNote: null,
@@ -196,8 +201,6 @@ let currentState = {
 let feedbackResetTimeout = null;
 let currentAudio = null;
 let currentAudioGainNode = null;
-let droneAudio = null;
-let droneCrossfadeTimeout = null;
 let nextTrialTimeout = null;
 let lastMidiNotePlayed = null;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -370,6 +373,12 @@ function setupFeedbackToggle() {
   feedbackToggle.addEventListener("change", (event) => {
     setLimitedFeedbackEnabled(event.target?.checked);
   });
+}
+
+function setupDroneCountSelect() {
+  if (!droneCountSelect) return;
+  populateDroneCountSelect();
+  droneCountSelect.addEventListener("change", handleDroneCountChange);
 }
 
 // function setupCrypticToggle() {
@@ -851,6 +860,8 @@ function setActiveChromaSetByValue(value, { skipSave = false } = {}) {
   }
   renderAnswerSetOptions({ exerciseType: getCurrentExerciseType() });
   resetCrypticAssignments();
+  populateDroneCountSelect({ selectedCount: selectedDroneCount });
+  startDronePlayersForCurrentSet();
   if (!skipSave) {
     saveChromaSetSelection(resolvedValue);
   }
@@ -1431,24 +1442,77 @@ function handleMidiMessage(message) {
   handleAnswer(chromaIndex);
 }
 
-function startDroneLoop() {
-  if (droneAudio) return;
-  const context = getAudioContext();
-  if (!context) {
-    droneAudio = new Audio(DRONE_AUDIO_SRC);
-    droneAudio.loop = true;
-    droneAudio.preload = "auto";
-    droneAudio.play().catch(() => {
-      // Ignore autoplay errors; the drone will start once playback is allowed.
-    });
-    return;
-  }
+function getDroneAudioSrc(chromaIndex) {
+  const clampedIndex = Math.max(0, Math.min(chromaIndex, DRONE_MIDI_END - DRONE_MIDI_START));
+  const midiNote = DRONE_MIDI_START + clampedIndex;
+  return `assets/Drones/${midiNote}.${DRONE_AUDIO_EXTENSION}`;
+}
 
-  droneAudio = createDroneInstance({
-    offsetSeconds: 0,
-    fadeInDurationMs: 0,
+function getMaxDroneCount() {
+  return activeChromaSet?.chromas?.length ?? 0;
+}
+
+function populateDroneCountSelect({ selectedCount = selectedDroneCount } = {}) {
+  if (!droneCountSelect) return;
+  const maxCount = getMaxDroneCount();
+  const resolvedCount = Math.max(0, Math.min(selectedCount, maxCount));
+  droneCountSelect.innerHTML = "";
+  for (let count = 0; count <= maxCount; count += 1) {
+    const option = document.createElement("option");
+    option.value = String(count);
+    option.textContent = String(count);
+    droneCountSelect.appendChild(option);
+  }
+  selectedDroneCount = resolvedCount;
+  droneCountSelect.value = String(resolvedCount);
+}
+
+function stopDronePlayers() {
+  dronePlayers.forEach((player) => {
+    if (player.crossfadeTimeout) {
+      clearTimeout(player.crossfadeTimeout);
+    }
+    if (player.instance) {
+      cleanupDroneInstance(player.instance);
+    }
+    if (player.fallbackAudio) {
+      player.fallbackAudio.pause();
+      player.fallbackAudio.currentTime = 0;
+    }
   });
-  scheduleDroneCrossfade(droneAudio);
+  dronePlayers = [];
+}
+
+function startDronePlayersForCurrentSet() {
+  stopDronePlayers();
+  if (!selectedDroneCount) return;
+  const availableChromas = activeChromaSet?.chromas?.map((chroma) => chroma.index) ?? [];
+  const requested = Math.min(selectedDroneCount, availableChromas.length);
+  if (!requested) return;
+  const chosen = shuffleArray(availableChromas).slice(0, requested);
+  chosen.forEach((chromaIndex) => {
+    const player = createDronePlayer(chromaIndex);
+    if (player) {
+      dronePlayers.push(player);
+    }
+  });
+}
+
+function setDroneCount(count) {
+  const maxCount = getMaxDroneCount();
+  const resolved = Number.isFinite(count)
+    ? Math.max(0, Math.min(count, maxCount))
+    : 0;
+  selectedDroneCount = resolved;
+  if (droneCountSelect) {
+    droneCountSelect.value = String(resolved);
+  }
+  startDronePlayersForCurrentSet();
+}
+
+function handleDroneCountChange(event) {
+  const count = Number.parseInt(event.target.value, 10);
+  setDroneCount(count);
 }
 
 function createEqualPowerCurve(isFadeIn, steps = 32) {
@@ -1477,10 +1541,10 @@ function cleanupDroneInstance(instance) {
   instance.source.disconnect();
 }
 
-function createDroneInstance({ offsetSeconds = 0, fadeInDurationMs = 0 }) {
+function createDroneInstance({ src, offsetSeconds = 0, fadeInDurationMs = 0 }) {
   const context = getAudioContext();
   if (!context) return null;
-  const audio = new Audio(DRONE_AUDIO_SRC);
+  const audio = new Audio(src);
   audio.preload = "auto";
 
   if (offsetSeconds > 0) {
@@ -1514,38 +1578,64 @@ function createDroneInstance({ offsetSeconds = 0, fadeInDurationMs = 0 }) {
   return { audio, gain, source };
 }
 
-function scheduleDroneCrossfade(currentInstance) {
-  if (!currentInstance) return;
-  if (droneCrossfadeTimeout) {
-    clearTimeout(droneCrossfadeTimeout);
+function scheduleDroneCrossfade(player) {
+  if (!player?.instance) return;
+  if (player.crossfadeTimeout) {
+    clearTimeout(player.crossfadeTimeout);
   }
-  droneCrossfadeTimeout = setTimeout(() => {
-    droneCrossfadeTimeout = null;
-    crossfadeDrone(currentInstance);
+  player.crossfadeTimeout = setTimeout(() => {
+    player.crossfadeTimeout = null;
+    crossfadeDrone(player);
   }, DRONE_CROSSFADE_START_MS);
 }
 
-function crossfadeDrone(currentInstance) {
+function crossfadeDrone(player) {
   const context = getAudioContext();
-  if (!context || !currentInstance) return;
+  if (!context || !player?.instance) return;
 
   const fadeDurationSeconds = DRONE_CROSSFADE_DURATION_MS / 1000;
   const now = context.currentTime;
 
+  const currentInstance = player.instance;
   applyEqualPowerFade(currentInstance.gain, now, fadeDurationSeconds, false);
 
   const nextInstance = createDroneInstance({
+    src: player.src,
     offsetSeconds: DRONE_RESTART_OFFSET_MS / 1000,
     fadeInDurationMs: DRONE_CROSSFADE_DURATION_MS,
   });
 
-  droneAudio = nextInstance;
+  player.instance = nextInstance;
 
   setTimeout(() => {
     cleanupDroneInstance(currentInstance);
   }, DRONE_CROSSFADE_DURATION_MS);
 
-  scheduleDroneCrossfade(nextInstance);
+  scheduleDroneCrossfade(player);
+}
+
+function createDronePlayer(chromaIndex) {
+  const src = getDroneAudioSrc(chromaIndex);
+  const context = getAudioContext();
+  if (!context) {
+    const audio = new Audio(src);
+    audio.loop = true;
+    audio.preload = "auto";
+    audio.play().catch(() => {
+      // Ignore autoplay errors; the drone will start once playback is allowed.
+    });
+    return { src, chromaIndex, fallbackAudio: audio, instance: null, crossfadeTimeout: null };
+  }
+
+  const instance = createDroneInstance({
+    src,
+    offsetSeconds: 0,
+    fadeInDurationMs: 0,
+  });
+  if (!instance) return null;
+  const player = { src, chromaIndex, instance, crossfadeTimeout: null };
+  scheduleDroneCrossfade(player);
+  return player;
 }
 
 function init() {
@@ -1555,6 +1645,7 @@ function init() {
   setupReducedRangeToggle();
   setupRandomizeButtonsToggle();
   setupFeedbackToggle();
+  setupDroneCountSelect();
   // setupCrypticToggle();
   setupCustomChromaButton();
   showStartButton();
@@ -1569,7 +1660,7 @@ function init() {
     statsOutput.textContent = "Select a chroma set to view stats.";
     statsOutput.hidden = true;
   }
-  startDroneLoop();
+  startDronePlayersForCurrentSet();
 }
 
 document.addEventListener("DOMContentLoaded", init);
