@@ -22,6 +22,8 @@ const CUSTOM_CHROMA_STORAGE_KEY = "ppt-custom-chromas";
 const TRIAL_LOG_STORAGE_KEY = "ppt-trial-log";
 const REDUCED_RANGE_STORAGE_KEY = "ppt-reduced-range-enabled";
 const RANDOMIZE_BUTTON_ORDER_KEY = "ppt-randomize-buttons";
+const DRONE_COUNT_STORAGE_KEY = "ppt-drone-count";
+const LIMITED_FEEDBACK_STORAGE_KEY = "ppt-limited-feedback";
 const RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL = 5;
 const FADE_DURATION_MS = 100;
 const DRONE_CROSSFADE_START_MS = 2000;
@@ -188,8 +190,8 @@ let crypticModeEnabled = false;
 let crypticAssignments = new Map();
 let crypticButtonOrder = [];
 let lastClickedChromaIndex = null;
-let limitedFeedbackEnabled = false;
-let selectedDroneCount = 0;
+let limitedFeedbackEnabled = loadSavedLimitedFeedbackSetting();
+let selectedDroneCount = loadSavedDroneCountSetting();
 let dronePlayers = [];
 let currentState = {
   chromaIndex: null,
@@ -372,6 +374,7 @@ function setLimitedFeedbackEnabled(isEnabled) {
   if (feedbackToggle) {
     feedbackToggle.checked = limitedFeedbackEnabled;
   }
+  saveLimitedFeedbackSetting(limitedFeedbackEnabled);
   if (limitedFeedbackEnabled) {
     resetButtonStates();
   }
@@ -727,6 +730,34 @@ function loadSavedRandomizeButtonsSetting() {
   return false;
 }
 
+function loadSavedDroneCountSetting() {
+  try {
+    const storedValue = localStorage.getItem(DRONE_COUNT_STORAGE_KEY);
+    if (storedValue !== null) {
+      const parsed = Number.parseInt(storedValue, 10);
+      if (Number.isInteger(parsed) && parsed >= 0) {
+        return parsed;
+      }
+    }
+  } catch (error) {
+    // Ignore storage errors and fall back to defaults.
+  }
+
+  return 0;
+}
+
+function loadSavedLimitedFeedbackSetting() {
+  try {
+    const storedValue = localStorage.getItem(LIMITED_FEEDBACK_STORAGE_KEY);
+    if (storedValue === "true") return true;
+    if (storedValue === "false") return false;
+  } catch (error) {
+    // Ignore storage errors and fall back to defaults.
+  }
+
+  return false;
+}
+
 function saveReducedRangeSetting(isReduced) {
   try {
     localStorage.setItem(REDUCED_RANGE_STORAGE_KEY, isReduced ? "true" : "false");
@@ -738,6 +769,22 @@ function saveReducedRangeSetting(isReduced) {
 function saveRandomizeButtonsSetting(isRandomized) {
   try {
     localStorage.setItem(RANDOMIZE_BUTTON_ORDER_KEY, isRandomized ? "true" : "false");
+  } catch (error) {
+    // Ignore storage errors; the setting just won't persist.
+  }
+}
+
+function saveDroneCountSetting(count) {
+  try {
+    localStorage.setItem(DRONE_COUNT_STORAGE_KEY, String(count));
+  } catch (error) {
+    // Ignore storage errors; the setting just won't persist.
+  }
+}
+
+function saveLimitedFeedbackSetting(isLimited) {
+  try {
+    localStorage.setItem(LIMITED_FEEDBACK_STORAGE_KEY, isLimited ? "true" : "false");
   } catch (error) {
     // Ignore storage errors; the setting just won't persist.
   }
@@ -1578,6 +1625,7 @@ function setDroneCount(count, { fadeOutMs = 0 } = {}) {
     droneCountSelect.value = String(resolved);
   }
   updateDroneResetButtonState();
+  saveDroneCountSetting(resolved);
   if (fadeOutMs > 0 && dronePlayers.length) {
     stopDronePlayers({ fadeOutMs });
     setTimeout(() => startDronePlayersForCurrentSet(), fadeOutMs);
@@ -1758,6 +1806,7 @@ function init() {
   setupReducedRangeToggle();
   setupRandomizeButtonsToggle();
   setupFeedbackToggle();
+  setLimitedFeedbackEnabled(limitedFeedbackEnabled);
   setupDroneCountSelect();
   setupDroneResetButton();
   // setupCrypticToggle();
