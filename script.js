@@ -26,6 +26,7 @@ const RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL = 5;
 const FADE_DURATION_MS = 100;
 const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
+const DRONE_AUDIO_SRC = "assets/Drones/48.mp3";
 // Toggle between "mp3" or "wav" to switch the asset set without exposing UI controls.
 const DEFAULT_AUDIO_FORMAT = "mp3";
 const CRYPTIC_WORDS = [
@@ -192,6 +193,7 @@ let currentState = {
 let feedbackResetTimeout = null;
 let currentAudio = null;
 let currentAudioGainNode = null;
+let droneAudio = null;
 let nextTrialTimeout = null;
 let lastMidiNotePlayed = null;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -1425,6 +1427,16 @@ function handleMidiMessage(message) {
   handleAnswer(chromaIndex);
 }
 
+function startDroneLoop() {
+  if (droneAudio) return;
+  droneAudio = new Audio(DRONE_AUDIO_SRC);
+  droneAudio.loop = true;
+  droneAudio.preload = "auto";
+  droneAudio.play().catch(() => {
+    // Ignore autoplay errors; the drone will start once playback is allowed.
+  });
+}
+
 function init() {
   loadTrialLog(TRIAL_LOG_STORAGE_KEY);
   populateChromaSetSelect();
@@ -1446,6 +1458,7 @@ function init() {
     statsOutput.textContent = "Select a chroma set to view stats.";
     statsOutput.hidden = true;
   }
+  startDroneLoop();
 }
 
 document.addEventListener("DOMContentLoaded", init);
