@@ -26,6 +26,9 @@ const RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL = 5;
 const FADE_DURATION_MS = 100;
 const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
+const DEFAULT_LOOP_START = 0;
+const DEFAULT_LOOP_END = null;
+const DEFAULT_CROSSFADE_MS = 120;
 // Toggle between "mp3" or "wav" to switch the asset set without exposing UI controls.
 const DEFAULT_AUDIO_FORMAT = "mp3";
 const CRYPTIC_WORDS = [
@@ -196,6 +199,8 @@ let nextTrialTimeout = null;
 let lastMidiNotePlayed = null;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 let audioContext = null;
+const audioBufferCache = new Map();
+const loopInstances = new Map();
 let pendingTrials = [];
 let pendingPreparationPromise = null;
 let pendingPreparationToken = 0;
@@ -296,6 +301,199 @@ function getAudioContext() {
   }
 
   return audioContext;
+}
+
+function resolveLoopDefaults(options = {}) {
+  return {
+    loopStart: options.loopStart ?? DEFAULT_LOOP_START,
+    loopEnd: options.loopEnd ?? DEFAULT_LOOP_END,
+    crossfadeMs: options.crossfadeMs ?? DEFAULT_CROSSFADE_MS,
+    url: options.url,
+    volume: options.volume ?? 1,
+  };
+}
+
+function getLoopCacheKey(id, options = {}) {
+  return options.url ?? id;
+}
+
+async function fetchAudioBuffer(id, options = {}) {
+  const context = getAudioContext();
+  if (!context) return null;
+
+  const cacheKey = getLoopCacheKey(id, options);
+  if (audioBufferCache.has(cacheKey)) {
+    return audioBufferCache.get(cacheKey);
+  }
+
+  const url = options.url ?? id;
+  const bufferPromise = fetch(url)
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`Failed to load audio loop from ${url}`);
+      }
+      return response.arrayBuffer();
+    })
+    .then((data) => context.decodeAudioData(data));
+
+  audioBufferCache.set(cacheKey, bufferPromise);
+  return bufferPromise;
+}
+
+function createLoopSource(context, buffer, gainNode, loopStart, loopEnd) {
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.loop = true;
+  source.loopStart = loopStart;
+  source.loopEnd = loopEnd;
+  source.connect(gainNode);
+  return source;
+}
+
+function scheduleLoopCrossfade(loopState) {
+  const {
+    context,
+    buffer,
+    loopStart,
+    loopEnd,
+    crossfadeSec,
+    gains,
+  } = loopState;
+
+  if (!loopState.isPlaying) return;
+
+  const loopDuration = Math.max(loopEnd - loopStart, 0.01);
+  const crossfadeDuration = Math.min(crossfadeSec, loopDuration);
+  const now = context.currentTime;
+  const activeKey = loopState.activeKey;
+  const inactiveKey = activeKey === "A" ? "B" : "A";
+  const activeGain = gains[activeKey];
+  const inactiveGain = gains[inactiveKey];
+
+  const nextStartTime = now + loopDuration - crossfadeDuration;
+
+  if (loopState.sources[inactiveKey]) {
+    loopState.sources[inactiveKey].disconnect();
+    loopState.sources[inactiveKey] = null;
+  }
+
+  const nextSource = createLoopSource(
+    context,
+    buffer,
+    inactiveGain,
+    loopStart,
+    loopEnd
+  );
+  loopState.sources[inactiveKey] = nextSource;
+
+  inactiveGain.gain.setValueAtTime(0, nextStartTime);
+  inactiveGain.gain.linearRampToValueAtTime(loopState.volume, nextStartTime + crossfadeDuration);
+  activeGain.gain.setValueAtTime(loopState.volume, nextStartTime);
+  activeGain.gain.linearRampToValueAtTime(0, nextStartTime + crossfadeDuration);
+
+  nextSource.start(nextStartTime, loopStart);
+
+  const activeSource = loopState.sources[activeKey];
+  if (activeSource) {
+    activeSource.stop(nextStartTime + crossfadeDuration);
+  }
+
+  loopState.activeKey = inactiveKey;
+  loopState.timeoutId = window.setTimeout(
+    () => scheduleLoopCrossfade(loopState),
+    Math.max((loopDuration - crossfadeDuration) * 1000, 10)
+  );
+}
+
+function cleanupLoopNodes(loopState) {
+  loopState.isPlaying = false;
+  if (loopState.timeoutId) {
+    window.clearTimeout(loopState.timeoutId);
+    loopState.timeoutId = null;
+  }
+
+  Object.values(loopState.sources).forEach((source) => {
+    if (!source) return;
+    try {
+      source.stop();
+    } catch (error) {
+      // ignore stop errors
+    }
+    source.disconnect();
+  });
+
+  Object.values(loopState.gains).forEach((gain) => {
+    if (!gain) return;
+    gain.disconnect();
+  });
+}
+
+async function startLoop(id, options = {}) {
+  const context = getAudioContext();
+  if (!context) return;
+
+  if (loopInstances.has(id)) {
+    stopLoop(id);
+  }
+
+  const resolvedOptions = resolveLoopDefaults(options);
+  const buffer = await fetchAudioBuffer(id, resolvedOptions);
+  if (!buffer) return;
+
+  const loopStart = Math.max(resolvedOptions.loopStart, 0);
+  const loopEnd = resolvedOptions.loopEnd ?? buffer.duration;
+  const crossfadeSec = Math.max(resolvedOptions.crossfadeMs, 0) / 1000;
+
+  const gainA = context.createGain();
+  const gainB = context.createGain();
+  gainA.gain.value = resolvedOptions.volume;
+  gainB.gain.value = 0;
+  gainA.connect(context.destination);
+  gainB.connect(context.destination);
+
+  const sourceA = createLoopSource(context, buffer, gainA, loopStart, loopEnd);
+  sourceA.start(context.currentTime, loopStart);
+
+  const loopState = {
+    id,
+    context,
+    buffer,
+    options: resolvedOptions,
+    loopStart,
+    loopEnd,
+    crossfadeSec,
+    volume: resolvedOptions.volume,
+    sources: { A: sourceA, B: null },
+    gains: { A: gainA, B: gainB },
+    activeKey: "A",
+    timeoutId: null,
+    isPlaying: true,
+  };
+
+  loopInstances.set(id, loopState);
+  scheduleLoopCrossfade(loopState);
+}
+
+function stopLoop(id) {
+  const loopState = loopInstances.get(id);
+  if (!loopState) return;
+  cleanupLoopNodes(loopState);
+  loopInstances.delete(id);
+}
+
+async function updateLoopOptions(id, options = {}) {
+  const loopState = loopInstances.get(id);
+  if (!loopState) {
+    await startLoop(id, options);
+    return;
+  }
+
+  const nextOptions = {
+    ...loopState.options,
+    ...options,
+  };
+
+  await startLoop(id, nextOptions);
 }
 
 function buildNotesByChroma(range = midiRange) {
@@ -1447,5 +1645,13 @@ function init() {
     statsOutput.hidden = true;
   }
 }
+
+window.loopManager = {
+  startLoop,
+  stopLoop,
+  updateLoopOptions,
+};
+
+export { startLoop, stopLoop, updateLoopOptions };
 
 document.addEventListener("DOMContentLoaded", init);
