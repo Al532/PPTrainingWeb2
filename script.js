@@ -27,7 +27,7 @@ const FADE_DURATION_MS = 100;
 const DRONE_CROSSFADE_START_MS = 2000;
 const DRONE_CROSSFADE_DURATION_MS = 300;
 const DRONE_RESTART_OFFSET_MS = 150;
-const DRONE_BASE_GAIN_DB = -6;
+const DRONE_BASE_GAIN_DB = -10;
 const DRONE_MIDI_START = 48;
 const DRONE_MIDI_END = 59;
 const DRONE_AUDIO_EXTENSION = "mp3";
@@ -1459,6 +1459,10 @@ function handleMidiMessage(message) {
   const [status, data1, data2] = message.data;
   const isNoteOn = (status & 0xf0) === 0x90 && data2 > 0;
   if (!isNoteOn) return;
+  if (data1 <= DRONE_MIDI_START - 1) {
+    handleDroneReset();
+    return;
+  }
   const chromaIndex = data1 % 12;
 
   handleAnswer(chromaIndex);
