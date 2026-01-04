@@ -24,6 +24,9 @@ const REDUCED_RANGE_STORAGE_KEY = "ppt-reduced-range-enabled";
 const RANDOMIZE_BUTTON_ORDER_KEY = "ppt-randomize-buttons";
 const RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL = 5;
 const FADE_DURATION_MS = 100;
+const DRONE_CROSSFADE_START_MS = 2000;
+const DRONE_CROSSFADE_DURATION_MS = 300;
+const DRONE_RESTART_OFFSET_MS = 150;
 const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
 const DRONE_AUDIO_SRC = "assets/Drones/48.mp3";
@@ -194,6 +197,7 @@ let feedbackResetTimeout = null;
 let currentAudio = null;
 let currentAudioGainNode = null;
 let droneAudio = null;
+let droneCrossfadeTimeout = null;
 let nextTrialTimeout = null;
 let lastMidiNotePlayed = null;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -1429,12 +1433,119 @@ function handleMidiMessage(message) {
 
 function startDroneLoop() {
   if (droneAudio) return;
-  droneAudio = new Audio(DRONE_AUDIO_SRC);
-  droneAudio.loop = true;
-  droneAudio.preload = "auto";
-  droneAudio.play().catch(() => {
-    // Ignore autoplay errors; the drone will start once playback is allowed.
+  const context = getAudioContext();
+  if (!context) {
+    droneAudio = new Audio(DRONE_AUDIO_SRC);
+    droneAudio.loop = true;
+    droneAudio.preload = "auto";
+    droneAudio.play().catch(() => {
+      // Ignore autoplay errors; the drone will start once playback is allowed.
+    });
+    return;
+  }
+
+  droneAudio = createDroneInstance({
+    offsetSeconds: 0,
+    fadeInDurationMs: 0,
   });
+  scheduleDroneCrossfade(droneAudio);
+}
+
+function createEqualPowerCurve(isFadeIn, steps = 32) {
+  const curve = new Float32Array(steps);
+  for (let i = 0; i < steps; i += 1) {
+    const t = i / (steps - 1);
+    curve[i] = isFadeIn ? Math.sin(t * Math.PI * 0.5) : Math.cos(t * Math.PI * 0.5);
+  }
+  return curve;
+}
+
+function applyEqualPowerFade(gainNode, startTime, durationSeconds, isFadeIn) {
+  const curve = createEqualPowerCurve(isFadeIn);
+  gainNode.gain.cancelScheduledValues(startTime);
+  gainNode.gain.setValueAtTime(isFadeIn ? 0 : 1, startTime);
+  if (durationSeconds > 0) {
+    gainNode.gain.setValueCurveAtTime(curve, startTime, durationSeconds);
+  }
+}
+
+function cleanupDroneInstance(instance) {
+  if (!instance) return;
+  instance.audio.pause();
+  instance.audio.currentTime = 0;
+  instance.gain.disconnect();
+  instance.source.disconnect();
+}
+
+function createDroneInstance({ offsetSeconds = 0, fadeInDurationMs = 0 }) {
+  const context = getAudioContext();
+  if (!context) return null;
+  const audio = new Audio(DRONE_AUDIO_SRC);
+  audio.preload = "auto";
+
+  if (offsetSeconds > 0) {
+    const setOffset = () => {
+      try {
+        audio.currentTime = offsetSeconds;
+      } catch (error) {
+        // Ignore offset errors and let playback continue at the default position.
+      }
+    };
+    audio.addEventListener("loadedmetadata", setOffset, { once: true });
+    setOffset();
+  }
+
+  const source = context.createMediaElementSource(audio);
+  const gain = context.createGain();
+  source.connect(gain).connect(context.destination);
+
+  const now = context.currentTime;
+  const fadeDurationSeconds = fadeInDurationMs / 1000;
+  if (fadeInDurationMs > 0) {
+    applyEqualPowerFade(gain, now, fadeDurationSeconds, true);
+  } else {
+    gain.gain.setValueAtTime(1, now);
+  }
+
+  audio.play().catch(() => {
+    cleanupDroneInstance({ audio, gain, source });
+  });
+
+  return { audio, gain, source };
+}
+
+function scheduleDroneCrossfade(currentInstance) {
+  if (!currentInstance) return;
+  if (droneCrossfadeTimeout) {
+    clearTimeout(droneCrossfadeTimeout);
+  }
+  droneCrossfadeTimeout = setTimeout(() => {
+    droneCrossfadeTimeout = null;
+    crossfadeDrone(currentInstance);
+  }, DRONE_CROSSFADE_START_MS);
+}
+
+function crossfadeDrone(currentInstance) {
+  const context = getAudioContext();
+  if (!context || !currentInstance) return;
+
+  const fadeDurationSeconds = DRONE_CROSSFADE_DURATION_MS / 1000;
+  const now = context.currentTime;
+
+  applyEqualPowerFade(currentInstance.gain, now, fadeDurationSeconds, false);
+
+  const nextInstance = createDroneInstance({
+    offsetSeconds: DRONE_RESTART_OFFSET_MS / 1000,
+    fadeInDurationMs: DRONE_CROSSFADE_DURATION_MS,
+  });
+
+  droneAudio = nextInstance;
+
+  setTimeout(() => {
+    cleanupDroneInstance(currentInstance);
+  }, DRONE_CROSSFADE_DURATION_MS);
+
+  scheduleDroneCrossfade(nextInstance);
 }
 
 function init() {
