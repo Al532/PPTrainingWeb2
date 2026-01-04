@@ -293,6 +293,14 @@ function getChromaLabelByIndex(chromaIndex) {
   return chromas.find((chroma) => chroma.index === chromaIndex)?.label ?? String(chromaIndex);
 }
 
+function getActiveDroneLabels() {
+  return dronePlayers
+    .map((player) => player?.chromaIndex)
+    .filter((chromaIndex) => Number.isFinite(chromaIndex))
+    .sort((a, b) => a - b)
+    .map((chromaIndex) => getChromaLabelByIndex(chromaIndex));
+}
+
 function getAudioContext() {
   if (!AudioContextClass) return null;
 
@@ -1283,6 +1291,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
       exerciseType: currentState.exerciseType || getCurrentExerciseType(),
       answerSet: currentState.answerSet || activeAnswerSet,
       reducedRangeEnabled,
+      dronesPlayed: getActiveDroneLabels(),
       "Limited feedback": limitedFeedbackEnabled,
       isCorrect,
     },
