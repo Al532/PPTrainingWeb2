@@ -1575,7 +1575,7 @@ function playPreparedTrial(trial) {
 }
 
 async function handleRecallPlay() {
-  if (recallPlayPending || !recallState?.targetChromaIndex) return;
+  if (recallPlayPending || recallState?.targetChromaIndex == null) return;
 
   if (currentTrial && recallState.playedChromaIndex != null) {
     playPreparedTrial(currentTrial);
