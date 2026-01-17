@@ -158,11 +158,11 @@ const MODES = [
 ];
 
 const RECALL_PRECISION_OPTIONS = [
-  { value: "fourth", label: "fourth", semitones: 5 },
-  { value: "major-third", label: "major third", semitones: 4 },
-  { value: "minor-third", label: "minor third", semitones: 3 },
-  { value: "second", label: "second", semitones: 2 },
-  { value: "minor-second", label: "minor second", semitones: 1 },
+  { value: "fourth", label: "Fourth", semitones: 5 },
+  { value: "major-third", label: "Major third", semitones: 4 },
+  { value: "minor-third", label: "Minor third", semitones: 3 },
+  { value: "second", label: "Major second", semitones: 2 },
+  { value: "minor-second", label: "Minor second", semitones: 1 },
 ];
 
 const buttonsContainer = document.getElementById("chroma-buttons");
@@ -367,6 +367,13 @@ function getActiveDroneLabels() {
     .map((chromaIndex) => getChromaLabelByIndex(chromaIndex));
 }
 
+function getDroneChromaPool() {
+  if (currentMode === "recall") {
+    return chromas.map((chroma) => chroma.index);
+  }
+  return activeChromaSet?.chromas?.map((chroma) => chroma.index) ?? [];
+}
+
 function getAudioContext() {
   if (!AudioContextClass) return null;
 
@@ -479,11 +486,11 @@ function renderPrecisionOptions(selectedValue = recallPrecisionValue) {
 function updateModeVisibility() {
   const isRecall = currentMode === "recall";
   if (answerSetRow) answerSetRow.hidden = isRecall;
-  if (droneRow) droneRow.hidden = isRecall;
+  if (droneRow) droneRow.hidden = false;
   if (reducedRangeRow) reducedRangeRow.hidden = isRecall;
   if (precisionRow) precisionRow.hidden = !isRecall;
   if (chromaSetRow) chromaSetRow.hidden = false;
-  if (feedbackRow) feedbackRow.hidden = false;
+  if (feedbackRow) feedbackRow.hidden = isRecall;
   updateReplayLabel();
 }
 
@@ -496,6 +503,8 @@ function setMode(modeValue, { skipSave = false } = {}) {
     modeSelect.value = resolvedMode;
   }
   updateModeVisibility();
+  populateDroneCountSelect({ selectedCount: selectedDroneCount });
+  startDronePlayersForCurrentSet();
   if (!skipSave) {
     saveModeSelection(resolvedMode);
   }
@@ -716,10 +725,46 @@ function createButtons(chromasForButtons = activeChromaSet?.chromas) {
   });
 }
 
-function createRecallButtons(chromaIndices = []) {
+function getRecallButtonOrder(chromaIndices = [], targetChromaIndex, semitones) {
+  const uniqueIndices = Array.from(new Set(chromaIndices));
+  if (!uniqueIndices.length) return [];
+  if (!Number.isInteger(targetChromaIndex)) return uniqueIndices;
+  if (uniqueIndices.length === 1) return uniqueIndices;
+
+  const otherIndices = uniqueIndices.filter((index) => index !== targetChromaIndex);
+  if (!otherIndices.length) return [targetChromaIndex];
+
+  if (Number.isInteger(semitones)) {
+    const lower = (targetChromaIndex - semitones + 12) % 12;
+    const higher = (targetChromaIndex + semitones) % 12;
+    const order = [];
+    if (otherIndices.includes(lower)) {
+      order.push(lower);
+    } else {
+      order.push(otherIndices[0]);
+    }
+    order.push(targetChromaIndex);
+    const remaining = otherIndices.filter((index) => index !== order[0]);
+    if (otherIndices.includes(higher)) {
+      order.push(higher);
+    } else if (remaining.length) {
+      order.push(remaining[0]);
+    }
+    return order;
+  }
+
+  const sortedOther = otherIndices.sort((a, b) => a - b);
+  if (sortedOther.length === 1) return [sortedOther[0], targetChromaIndex];
+  return [sortedOther[0], targetChromaIndex, sortedOther[1]];
+}
+
+function createRecallButtons(
+  chromaIndices = [],
+  { targetChromaIndex = recallState?.targetChromaIndex, semitones } = {}
+) {
   if (!chromaIndices.length) return;
   buttonsContainer.innerHTML = "";
-  const order = shuffleArray(chromaIndices);
+  const order = getRecallButtonOrder(chromaIndices, targetChromaIndex, semitones);
   order.forEach((chromaIndex) => {
     const chroma = chromas.find((entry) => entry.index === chromaIndex);
     if (!chroma) return;
@@ -840,11 +885,18 @@ function updateReplayAvailability() {
   }
 
   replayButton.disabled = !canReplay;
+  updateReplayLabel();
 }
 
 function updateReplayLabel() {
   if (!replayButton) return;
-  replayButton.textContent = currentMode === "recall" ? "Play" : "Replay";
+  if (currentMode === "recall") {
+    const shouldReplay =
+      recallState?.playedChromaIndex != null && currentState.awaitingGuess;
+    replayButton.textContent = shouldReplay ? "Replay" : "Play";
+    return;
+  }
+  replayButton.textContent = "Replay";
 }
 
 function scheduleFeedbackReset(durationMs = CORRECT_FEEDBACK_DURATION) {
@@ -1567,7 +1619,10 @@ async function handleRecallPlay() {
   };
   currentTrial = trial;
   lastMidiNotePlayed = trial.midiNote;
-  createRecallButtons(recallState.options);
+  createRecallButtons(recallState.options, {
+    targetChromaIndex: recallState.targetChromaIndex,
+    semitones: recallState.precisionSemitones,
+  });
   updateReplayAvailability();
   playPreparedTrial(trial);
 }
@@ -1906,7 +1961,7 @@ function getDroneAudioSrc(chromaIndex) {
 }
 
 function getMaxDroneCount() {
-  return activeChromaSet?.chromas?.length ?? 0;
+  return getDroneChromaPool().length;
 }
 
 function populateDroneCountSelect({ selectedCount = selectedDroneCount } = {}) {
@@ -1986,7 +2041,7 @@ function stopDronePlayers({ fadeOutMs = 0 } = {}) {
 function startDronePlayersForCurrentSet() {
   stopDronePlayers();
   if (!selectedDroneCount) return;
-  const availableChromas = activeChromaSet?.chromas?.map((chroma) => chroma.index) ?? [];
+  const availableChromas = getDroneChromaPool();
   const requested = Math.min(selectedDroneCount, availableChromas.length);
   if (!requested) return;
   const targetGain = getDroneGainForCount(requested);
