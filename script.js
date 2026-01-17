@@ -24,6 +24,8 @@ const REDUCED_RANGE_STORAGE_KEY = "ppt-reduced-range-enabled";
 const RANDOMIZE_BUTTON_ORDER_KEY = "ppt-randomize-buttons";
 const DRONE_COUNT_STORAGE_KEY = "ppt-drone-count";
 const LIMITED_FEEDBACK_STORAGE_KEY = "ppt-limited-feedback";
+const LAST_MODE_STORAGE_KEY = "ppt-last-mode";
+const LAST_RECALL_PRECISION_KEY = "ppt-last-recall-precision";
 const RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL = 5;
 const FADE_DURATION_MS = 100;
 const DRONE_CROSSFADE_START_MS = 2000;
@@ -150,9 +152,23 @@ const ANSWER_SET_PRIORITY = [
   "Tritones",
 ];
 
+const MODES = [
+  { value: "recognize", label: "Recognize" },
+  { value: "recall", label: "Recall" },
+];
+
+const RECALL_PRECISION_OPTIONS = [
+  { value: "fourth", label: "fourth", semitones: 5 },
+  { value: "major-third", label: "major third", semitones: 4 },
+  { value: "minor-third", label: "minor third", semitones: 3 },
+  { value: "second", label: "second", semitones: 2 },
+  { value: "minor-second", label: "minor second", semitones: 1 },
+];
 
 const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
+const modeSelect = document.getElementById("mode-select");
+const precisionSelect = document.getElementById("precision-select");
 const chromaSetSelect = document.getElementById("chroma-set-select");
 const answerSetSelect = document.getElementById("answer-set-select");
 const droneCountSelect = document.getElementById("drone-count-select");
@@ -161,6 +177,13 @@ const customChromaButton = document.getElementById("custom-chroma-button");
 const customChromaButtons = document.getElementById("custom-chroma-buttons");
 const customChromaPicker = document.getElementById("custom-chroma-picker");
 const customChromaRow = document.getElementById("custom-chroma-row");
+const chromaSetRow = document.getElementById("chroma-set-row");
+const answerSetRow = document.getElementById("answer-set-row");
+const droneRow = document.getElementById("drone-row");
+const reducedRangeRow = document.getElementById("reduced-range-row");
+const feedbackRow = document.getElementById("feedback-row");
+const precisionRow = document.getElementById("precision-row");
+const recallMessage = document.getElementById("recall-message");
 const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
@@ -191,15 +214,19 @@ let crypticAssignments = new Map();
 let crypticButtonOrder = [];
 let lastClickedChromaIndex = null;
 let limitedFeedbackEnabled = loadSavedLimitedFeedbackSetting();
+let currentMode = loadSavedMode();
+let recallPrecisionValue = loadSavedRecallPrecision();
 let selectedDroneCount = loadSavedDroneCountSetting();
 let dronePlayers = [];
+let recallState = createEmptyRecallState();
+let recallPlayPending = false;
 let currentState = {
   chromaIndex: null,
   midiNote: null,
   instrument: null,
   chromaSetLabel: "",
   exerciseType: "",
-  answerSet: "",
+  answerSet: null,
   awaitingGuess: false,
 };
 let feedbackResetTimeout = null;
@@ -228,11 +255,48 @@ function normalizeExerciseType(type = "") {
 }
 
 function getCurrentExerciseType() {
+  if (currentMode === "recall") {
+    return "Recall";
+  }
   return (
     normalizeExerciseType(
       activeChromaSet?.exerciseType || getExerciseTypeFromLabel(activeChromaSet?.label)
     )
   );
+}
+
+function getModeLabel(mode = currentMode) {
+  return MODES.find((option) => option.value === mode)?.label ?? "Recognize";
+}
+
+function getRecallPrecisionConfig(value = recallPrecisionValue) {
+  return (
+    RECALL_PRECISION_OPTIONS.find((option) => option.value === value) ??
+    RECALL_PRECISION_OPTIONS[0]
+  );
+}
+
+function createEmptyRecallState() {
+  return {
+    targetChromaIndex: null,
+    options: [],
+    playedChromaIndex: null,
+    midiNote: null,
+    instrument: null,
+    audioElement: null,
+    precisionLabel: "",
+    precisionSemitones: 0,
+  };
+}
+
+function getRecallOptions(targetChromaIndex, semitones) {
+  if (!Number.isInteger(targetChromaIndex) || !Number.isInteger(semitones)) return [];
+  const values = [
+    targetChromaIndex,
+    (targetChromaIndex + semitones + 12) % 12,
+    (targetChromaIndex - semitones + 12) % 12,
+  ];
+  return Array.from(new Set(values));
 }
 
 function normalizeAnswerSetType(answerSet = "") {
@@ -385,6 +449,91 @@ function setupFeedbackToggle() {
   feedbackToggle.checked = limitedFeedbackEnabled;
   feedbackToggle.addEventListener("change", (event) => {
     setLimitedFeedbackEnabled(event.target?.checked);
+  });
+}
+
+function renderModeOptions(selectedValue = currentMode) {
+  if (!modeSelect) return;
+  modeSelect.innerHTML = "";
+  MODES.forEach((mode) => {
+    const option = document.createElement("option");
+    option.value = mode.value;
+    option.textContent = mode.label;
+    modeSelect.appendChild(option);
+  });
+  modeSelect.value = selectedValue;
+}
+
+function renderPrecisionOptions(selectedValue = recallPrecisionValue) {
+  if (!precisionSelect) return;
+  precisionSelect.innerHTML = "";
+  RECALL_PRECISION_OPTIONS.forEach((optionConfig) => {
+    const option = document.createElement("option");
+    option.value = optionConfig.value;
+    option.textContent = optionConfig.label;
+    precisionSelect.appendChild(option);
+  });
+  precisionSelect.value = selectedValue;
+}
+
+function updateModeVisibility() {
+  const isRecall = currentMode === "recall";
+  if (answerSetRow) answerSetRow.hidden = isRecall;
+  if (droneRow) droneRow.hidden = isRecall;
+  if (reducedRangeRow) reducedRangeRow.hidden = isRecall;
+  if (precisionRow) precisionRow.hidden = !isRecall;
+  if (chromaSetRow) chromaSetRow.hidden = false;
+  if (feedbackRow) feedbackRow.hidden = false;
+  updateReplayLabel();
+}
+
+function setMode(modeValue, { skipSave = false } = {}) {
+  const resolvedMode = MODES.some((mode) => mode.value === modeValue)
+    ? modeValue
+    : "recognize";
+  currentMode = resolvedMode;
+  if (modeSelect) {
+    modeSelect.value = resolvedMode;
+  }
+  updateModeVisibility();
+  if (!skipSave) {
+    saveModeSelection(resolvedMode);
+  }
+  showStartButton();
+  refreshStatsIfOpen();
+}
+
+function setRecallPrecision(value, { skipSave = false } = {}) {
+  const resolvedValue = RECALL_PRECISION_OPTIONS.some(
+    (option) => option.value === value
+  )
+    ? value
+    : RECALL_PRECISION_OPTIONS[0]?.value ?? "fourth";
+  recallPrecisionValue = resolvedValue;
+  if (precisionSelect) {
+    precisionSelect.value = resolvedValue;
+  }
+  if (!skipSave) {
+    saveRecallPrecisionSelection(resolvedValue);
+  }
+  if (currentMode === "recall") {
+    showStartButton();
+  }
+}
+
+function setupModeSelect() {
+  if (!modeSelect) return;
+  renderModeOptions(currentMode);
+  modeSelect.addEventListener("change", (event) => {
+    setMode(event.target.value);
+  });
+}
+
+function setupPrecisionSelect() {
+  if (!precisionSelect) return;
+  renderPrecisionOptions(recallPrecisionValue);
+  precisionSelect.addEventListener("change", (event) => {
+    setRecallPrecision(event.target.value);
   });
 }
 
@@ -567,6 +716,35 @@ function createButtons(chromasForButtons = activeChromaSet?.chromas) {
   });
 }
 
+function createRecallButtons(chromaIndices = []) {
+  if (!chromaIndices.length) return;
+  buttonsContainer.innerHTML = "";
+  const order = shuffleArray(chromaIndices);
+  order.forEach((chromaIndex) => {
+    const chroma = chromas.find((entry) => entry.index === chromaIndex);
+    if (!chroma) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chroma";
+    btn.textContent = chroma.label;
+    btn.dataset.index = chroma.index;
+    btn.addEventListener("click", () => handleAnswer(chroma.index));
+    buttonsContainer.appendChild(btn);
+  });
+}
+
+function renderRecallMessage() {
+  if (!recallMessage) return;
+  if (recallState?.targetChromaIndex == null) {
+    recallMessage.hidden = true;
+    recallMessage.textContent = "";
+    return;
+  }
+  const label = getChromaLabelByIndex(recallState.targetChromaIndex);
+  recallMessage.textContent = `Recall ${label}`;
+  recallMessage.hidden = false;
+}
+
 function showStartButton() {
   resetTrialState();
   resetRandomizedButtonOrder();
@@ -579,7 +757,9 @@ function showStartButton() {
   btn.textContent = "START";
   btn.addEventListener("click", handleStartClick);
   buttonsContainer.appendChild(btn);
-  preparePendingTrial();
+  if (currentMode === "recognize") {
+    preparePendingTrial();
+  }
   updateReplayAvailability();
 }
 
@@ -607,6 +787,7 @@ function resetTrialState() {
   cancelScheduledFade();
   fadeOutCurrentAudio();
   currentTrial = null;
+  recallPlayPending = false;
   if (feedbackResetTimeout) {
     clearTimeout(feedbackResetTimeout);
     feedbackResetTimeout = null;
@@ -618,13 +799,19 @@ function resetTrialState() {
     instrument: null,
     chromaSetLabel: "",
     exerciseType: "",
-    answerSet: "",
+    answerSet: null,
     awaitingGuess: false,
   };
+  recallState = createEmptyRecallState();
+  if (recallMessage) {
+    recallMessage.hidden = true;
+    recallMessage.textContent = "";
+  }
   clearPendingTrials();
 }
 
 function refreshButtonOrder() {
+  if (currentMode === "recall") return;
   if (!currentState.awaitingGuess || currentState.chromaIndex == null) return;
 
   const chromasForButtons = getChromasForTrial(currentState.chromaIndex);
@@ -638,12 +825,26 @@ function handleStartClick() {
 function updateReplayAvailability() {
   if (!replayButton) return;
 
-  const canReplay =
-    currentState.awaitingGuess &&
-    currentTrial?.instrument &&
-    Number.isFinite(currentTrial?.midiNote);
+  let canReplay = false;
+
+  if (currentMode === "recall") {
+    const hasTarget = recallState?.targetChromaIndex != null;
+    const hasPlayed = recallState?.playedChromaIndex != null;
+    canReplay =
+      hasTarget && !recallPlayPending && (currentState.awaitingGuess || !hasPlayed);
+  } else {
+    canReplay =
+      currentState.awaitingGuess &&
+      currentTrial?.instrument &&
+      Number.isFinite(currentTrial?.midiNote);
+  }
 
   replayButton.disabled = !canReplay;
+}
+
+function updateReplayLabel() {
+  if (!replayButton) return;
+  replayButton.textContent = currentMode === "recall" ? "Play" : "Replay";
 }
 
 function scheduleFeedbackReset(durationMs = CORRECT_FEEDBACK_DURATION) {
@@ -758,6 +959,32 @@ function loadSavedLimitedFeedbackSetting() {
   return false;
 }
 
+function loadSavedMode() {
+  try {
+    const storedValue = localStorage.getItem(LAST_MODE_STORAGE_KEY);
+    if (MODES.some((mode) => mode.value === storedValue)) {
+      return storedValue;
+    }
+  } catch (error) {
+    // Ignore storage errors and fall back to default.
+  }
+
+  return "recognize";
+}
+
+function loadSavedRecallPrecision() {
+  try {
+    const storedValue = localStorage.getItem(LAST_RECALL_PRECISION_KEY);
+    if (RECALL_PRECISION_OPTIONS.some((option) => option.value === storedValue)) {
+      return storedValue;
+    }
+  } catch (error) {
+    // Ignore storage errors and fall back to default.
+  }
+
+  return RECALL_PRECISION_OPTIONS[0]?.value ?? "fourth";
+}
+
 function saveReducedRangeSetting(isReduced) {
   try {
     localStorage.setItem(REDUCED_RANGE_STORAGE_KEY, isReduced ? "true" : "false");
@@ -785,6 +1012,22 @@ function saveDroneCountSetting(count) {
 function saveLimitedFeedbackSetting(isLimited) {
   try {
     localStorage.setItem(LIMITED_FEEDBACK_STORAGE_KEY, isLimited ? "true" : "false");
+  } catch (error) {
+    // Ignore storage errors; the setting just won't persist.
+  }
+}
+
+function saveModeSelection(value) {
+  try {
+    localStorage.setItem(LAST_MODE_STORAGE_KEY, String(value));
+  } catch (error) {
+    // Ignore storage errors; the setting just won't persist.
+  }
+}
+
+function saveRecallPrecisionSelection(value) {
+  try {
+    localStorage.setItem(LAST_RECALL_PRECISION_KEY, String(value));
   } catch (error) {
     // Ignore storage errors; the setting just won't persist.
   }
@@ -1118,6 +1361,13 @@ function pickRandomNote(chromaIndex, excludedMidiNote) {
 }
 
 async function startTrial(attempt = 0) {
+  if (currentMode === "recall") {
+    return startRecallTrial();
+  }
+  return startRecognizeTrial(attempt);
+}
+
+async function startRecognizeTrial(attempt = 0) {
   cancelNextTrialTimeout();
   resetButtonFocus();
 
@@ -1167,6 +1417,50 @@ async function startTrial(attempt = 0) {
   updateReplayAvailability();
   playPreparedTrial(trial);
   preparePendingTrial();
+}
+
+async function startRecallTrial() {
+  cancelNextTrialTimeout();
+  resetButtonFocus();
+  clearPendingTrials();
+
+  if (!activeChromaSet || !activeChromaSet.chromas.length) {
+    currentState.awaitingGuess = false;
+    currentTrial = null;
+    updateReplayAvailability();
+    return;
+  }
+
+  const precisionConfig = getRecallPrecisionConfig();
+  const targetChromaIndex = pickRandomChroma();
+  if (targetChromaIndex == null) {
+    currentState.awaitingGuess = false;
+    currentTrial = null;
+    updateReplayAvailability();
+    return;
+  }
+
+  recallState = {
+    ...createEmptyRecallState(),
+    targetChromaIndex,
+    options: getRecallOptions(targetChromaIndex, precisionConfig.semitones),
+    precisionLabel: precisionConfig.label,
+    precisionSemitones: precisionConfig.semitones,
+  };
+
+  currentState = {
+    chromaIndex: null,
+    midiNote: null,
+    instrument: null,
+    chromaSetLabel: activeChromaSet?.label ?? "",
+    exerciseType: "Recall",
+    answerSet: null,
+    awaitingGuess: false,
+  };
+  currentTrial = null;
+  renderRecallMessage();
+  buttonsContainer.innerHTML = "";
+  updateReplayAvailability();
 }
 
 function stopCurrentAudio() {
@@ -1228,6 +1522,56 @@ function playPreparedTrial(trial) {
     });
 }
 
+async function handleRecallPlay() {
+  if (recallPlayPending || !recallState?.targetChromaIndex) return;
+
+  if (currentTrial && recallState.playedChromaIndex != null) {
+    playPreparedTrial(currentTrial);
+    return;
+  }
+
+  recallPlayPending = true;
+  updateReplayAvailability();
+
+  const optionPool = recallState.options.length
+    ? recallState.options
+    : getRecallOptions(recallState.targetChromaIndex, recallState.precisionSemitones);
+  const chosenChroma =
+    optionPool[Math.floor(Math.random() * optionPool.length)] ??
+    recallState.targetChromaIndex;
+
+  const trial = await findPlayableTrialForChroma(chosenChroma, lastMidiNotePlayed);
+  recallPlayPending = false;
+
+  if (!trial) {
+    updateReplayAvailability();
+    return;
+  }
+
+  recallState = {
+    ...recallState,
+    playedChromaIndex: trial.chromaIndex,
+    midiNote: trial.midiNote,
+    instrument: trial.instrument,
+    audioElement: trial.audioElement,
+  };
+
+  currentState = {
+    chromaIndex: trial.chromaIndex,
+    midiNote: trial.midiNote,
+    instrument: trial.instrument,
+    chromaSetLabel: activeChromaSet?.label ?? "",
+    exerciseType: "Recall",
+    answerSet: null,
+    awaitingGuess: true,
+  };
+  currentTrial = trial;
+  lastMidiNotePlayed = trial.midiNote;
+  createRecallButtons(recallState.options);
+  updateReplayAvailability();
+  playPreparedTrial(trial);
+}
+
 function replayCurrentTrial() {
   if (!currentState.awaitingGuess || !currentTrial) return;
 
@@ -1235,6 +1579,10 @@ function replayCurrentTrial() {
 }
 
 function handleReplayClick() {
+  if (currentMode === "recall") {
+    handleRecallPlay();
+    return;
+  }
   replayCurrentTrial();
 }
 
@@ -1327,6 +1675,12 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
   const isCorrect = chosenChroma === currentState.chromaIndex;
   const chosenButton = getChromaButton(chosenChroma);
   const correctButton = getChromaButton(currentState.chromaIndex);
+  const resolvedAnswerSet =
+    currentState.answerSet === undefined ? activeAnswerSet : currentState.answerSet;
+  const recallTargetLabel =
+    recallState?.targetChromaIndex != null
+      ? getChromaLabelByIndex(recallState.targetChromaIndex)
+      : "";
 
   logTrialResult(
     {
@@ -1336,10 +1690,13 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
       instrument: currentState.instrument,
       userSelectedChroma: getChromaLabelByIndex(chosenChroma),
       exerciseType: currentState.exerciseType || getCurrentExerciseType(),
-      answerSet: currentState.answerSet || activeAnswerSet,
+      answerSet: resolvedAnswerSet,
       reducedRangeEnabled,
       dronesPlayed: getActiveDroneLabels(),
       "Limited feedback": limitedFeedbackEnabled,
+      Mode: getModeLabel(),
+      "Recall precision": recallState?.precisionLabel || "",
+      "Recall note": recallTargetLabel,
       isCorrect,
     },
     { storageKey: TRIAL_LOG_STORAGE_KEY }
@@ -1364,7 +1721,9 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     scheduleAudioFade(feedbackDuration);
   }
 
-  preparePendingTrial();
+  if (currentMode === "recognize") {
+    preparePendingTrial();
+  }
 
   if (!limitedFeedbackEnabled) {
     scheduleFeedbackReset(feedbackDuration);
@@ -1393,7 +1752,11 @@ function scheduleNextTrial(feedbackDuration) {
     nextTrialTimeout = null;
     startTrial();
   }, delayUntilNextTrial);
-  if (pendingTrials.length < PREFETCH_TRIAL_COUNT && !pendingPreparationPromise) {
+  if (
+    currentMode === "recognize" &&
+    pendingTrials.length < PREFETCH_TRIAL_COUNT &&
+    !pendingPreparationPromise
+  ) {
     preparePendingTrial();
   }
 }
@@ -1405,6 +1768,7 @@ function clearPendingTrials() {
 }
 
 async function preparePendingTrial() {
+  if (currentMode === "recall") return null;
   if (pendingTrials.length >= PREFETCH_TRIAL_COUNT) return pendingTrials[0];
   if (pendingPreparationPromise) return pendingPreparationPromise;
 
@@ -1449,6 +1813,26 @@ async function findPlayableTrial(attempt = 0, excludedMidiNote = null) {
   const audioElement = await prepareAudioElement(instrument, midiNote);
   if (!audioElement) {
     return findPlayableTrial(attempt + 1, excludedMidiNote);
+  }
+
+  return { chromaIndex, midiNote, instrument, audioElement };
+}
+
+async function findPlayableTrialForChroma(chromaIndex, excludedMidiNote = null, attempt = 0) {
+  const MAX_ATTEMPTS = 30;
+  if (!Number.isInteger(chromaIndex)) return null;
+  if (attempt >= MAX_ATTEMPTS) return null;
+
+  const midiNote = pickRandomNote(chromaIndex, excludedMidiNote);
+  const instrument = await pickInstrumentForNote(midiNote);
+
+  if (!instrument) {
+    return findPlayableTrialForChroma(chromaIndex, excludedMidiNote, attempt + 1);
+  }
+
+  const audioElement = await prepareAudioElement(instrument, midiNote);
+  if (!audioElement) {
+    return findPlayableTrialForChroma(chromaIndex, excludedMidiNote, attempt + 1);
   }
 
   return { chromaIndex, midiNote, instrument, audioElement };
@@ -1801,6 +2185,8 @@ function getDroneGainForCount(count) {
 
 function init() {
   loadTrialLog(TRIAL_LOG_STORAGE_KEY);
+  setupModeSelect();
+  setupPrecisionSelect();
   populateChromaSetSelect();
   populateAnswerSetSelect();
   setupReducedRangeToggle();
@@ -1811,6 +2197,7 @@ function init() {
   setupDroneResetButton();
   // setupCrypticToggle();
   setupCustomChromaButton();
+  updateModeVisibility();
   showStartButton();
   setupMidi();
   if (statsButton) {

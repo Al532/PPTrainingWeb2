@@ -171,6 +171,13 @@ main {
   min-width: 120px;
 }
 
+.recall-message {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 800;
+  margin: 12px 0 18px;
+}
+
 .stats {
   margin-top: 28px;
 }
