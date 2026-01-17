@@ -22,14 +22,22 @@
 
     <section class="controls" aria-label="Chromas">
       <div class="controls-row">
+        <label for="mode-select">Mode</label>
+        <select id="mode-select"></select>
+      </div>
+      <div class="controls-row" id="precision-row">
+        <label for="precision-select">Precision</label>
+        <select id="precision-select"></select>
+      </div>
+      <div class="controls-row" id="chroma-set-row">
         <label for="chroma-set-select">Chroma set</label>
         <select id="chroma-set-select"></select>
       </div>
-      <div class="controls-row">
+      <div class="controls-row" id="answer-set-row">
         <label for="answer-set-select">Answer set</label>
         <select id="answer-set-select"></select>
       </div>
-      <div class="controls-row">
+      <div class="controls-row" id="drone-row">
         <label for="drone-count-select">Drones</label>
         <select id="drone-count-select"></select>
         <button type="button" id="drone-reset-button" class="secondary-button">Reset drones</button>
@@ -37,7 +45,7 @@
       <div class="controls-row custom-row" id="custom-chroma-row">
         <button type="button" id="custom-chroma-button" class="secondary-button">Custom chroma set</button>
       </div>
-      <div class="controls-row toggle-row">
+      <div class="controls-row toggle-row" id="reduced-range-row">
         <label class="checkbox-label">
           <input type="checkbox" id="reduced-range-toggle">
           <div class="label">Reduced range (removes the top and bottom 12 notes)</div>
@@ -51,12 +59,13 @@
         </label>
       </div>
       -->
-      <div class="controls-row toggle-row">
+      <div class="controls-row toggle-row" id="feedback-row">
         <label class="checkbox-label">
           <input type="checkbox" id="feedback-toggle">
           <div class="label">Limited feedback</div>
         </label>
       </div>
+      <div id="recall-message" class="recall-message" hidden></div>
       <div class="replay-row" id="replay-row">
         <button type="button" id="replay-button" class="chroma replay-button" disabled>
           Replay
