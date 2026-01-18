@@ -39,102 +39,6 @@ const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
 // Toggle between "mp3" or "wav" to switch the asset set without exposing UI controls.
 const DEFAULT_AUDIO_FORMAT = "mp3";
-const CRYPTIC_WORDS = [
-  "ba",
-  "be",
-  "bi",
-  "bo",
-  "bu",
-  "ca",
-  "ce",
-  "ci",
-  "co",
-  "cu",
-  "da",
-  "de",
-  "di",
-  "du",
-  "fe",
-  "fi",
-  "fo",
-  "fu",
-  "ga",
-  "ge",
-  "gi",
-  "go",
-  "gu",
-  "ha",
-  "he",
-  "hi",
-  "ho",
-  "hu",
-  "ja",
-  "je",
-  "ji",
-  "jo",
-  "ju",
-  "ka",
-  "ke",
-  "ki",
-  "ko",
-  "ku",
-  "le",
-  "li",
-  "lo",
-  "lu",
-  "ma",
-  "me",
-  "mo",
-  "mu",
-  "na",
-  "ne",
-  "ni",
-  "no",
-  "nu",
-  "pa",
-  "pe",
-  "pi",
-  "po",
-  "pu",
-  "qa",
-  "qe",
-  "qi",
-  "qo",
-  "qu",
-  "ra",
-  "ri",
-  "ro",
-  "ru",
-  "sa",
-  "se",
-  "so",
-  "su",
-  "ta",
-  "te",
-  "ti",
-  "to",
-  "tu",
-  "va",
-  "ve",
-  "vi",
-  "vo",
-  "vu",
-  "wa",
-  "we",
-  "wi",
-  "wo",
-  "wu",
-  "xa",
-  "xe",
-  "xi",
-  "xo",
-  "xu",
-  "za",
-  "ze",
-  "zi",
-  "zo",
-  "zu",
-];
 
 const ANSWER_SET_TYPES = [
   "Auto",
@@ -189,7 +93,6 @@ const statsOutput = document.getElementById("stats-output");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
 const randomizeButtonsToggle = document.getElementById("randomize-buttons-toggle");
 const feedbackToggle = document.getElementById("feedback-toggle");
-// const crypticToggle = document.getElementById("cryptic-toggle");
 const replayButton = document.getElementById("replay-button");
 const replayRow = document.getElementById("replay-row");
 
@@ -209,9 +112,6 @@ let customChromaSet = buildCustomChromaSet(customChromaSelection);
 let isCustomSelectionOpen = false;
 let pendingCustomSelection = new Set(customChromaSelection);
 let audioFormat = DEFAULT_AUDIO_FORMAT;
-let crypticModeEnabled = false;
-let crypticAssignments = new Map();
-let crypticButtonOrder = [];
 let lastClickedChromaIndex = null;
 let limitedFeedbackEnabled = loadSavedLimitedFeedbackSetting();
 let currentMode = loadSavedMode();
@@ -566,15 +466,6 @@ function updateDroneResetButtonState() {
   droneResetButton.disabled = selectedDroneCount === 0;
 }
 
-// function setupCrypticToggle() {
-//   if (!crypticToggle) return;
-
-//   crypticToggle.checked = crypticModeEnabled;
-//   crypticToggle.addEventListener("change", (event) => {
-//     applyCrypticMode(event.target?.checked);
-//   });
-// }
-
 function getAudioFormatConfig(format = audioFormat) {
   return audioFormats[format] ?? audioFormats.mp3;
 }
@@ -661,11 +552,6 @@ function getChromaOrderForButtons(chromasForButtons = []) {
   return randomizedButtonOrder;
 }
 
-function resetCrypticAssignments() {
-  crypticAssignments = new Map();
-  crypticButtonOrder = [];
-}
-
 function findAnswerSetForChroma(chromaIndex, answerSetType) {
   if (!Number.isInteger(chromaIndex)) return null;
   const normalizedAnswerSet = normalizeAnswerSetType(answerSetType);
@@ -699,17 +585,11 @@ function getChromasForTrial(chromaIndex) {
 function createButtons(chromasForButtons = activeChromaSet?.chromas) {
   if (!chromasForButtons?.length) return;
 
-  // Cryptic mode disabled.
-  resetCrypticAssignments();
-
   buttonsContainer.innerHTML = "";
   const chromaByIndex = new Map(
     chromasForButtons.map((chroma) => [chroma.index, chroma])
   );
 
-  // const chromaOrder = crypticModeEnabled
-  //   ? crypticButtonOrder
-  //   : chromasForButtons.map((chroma) => chroma.index);
   const chromaOrder = getChromaOrderForButtons(chromasForButtons);
 
   chromaOrder.forEach((chromaIndex) => {
@@ -718,9 +598,6 @@ function createButtons(chromasForButtons = activeChromaSet?.chromas) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "chroma";
-    // btn.textContent = crypticModeEnabled
-    //   ? crypticAssignments.get(chroma.index)
-    //   : chroma.label;
     btn.textContent = chroma.label;
     btn.dataset.index = chroma.index;
     btn.addEventListener("click", () => handleAnswer(chroma.index));
@@ -1225,7 +1102,6 @@ function setActiveChromaSetByValue(value, { skipSave = false } = {}) {
     chromaSetSelect.value = resolvedValue;
   }
   renderAnswerSetOptions({ exerciseType: getCurrentExerciseType() });
-  resetCrypticAssignments();
   populateDroneCountSelect({ selectedCount: selectedDroneCount });
   startDronePlayersForCurrentSet();
   if (!skipSave) {
@@ -2262,7 +2138,6 @@ function init() {
   setLimitedFeedbackEnabled(limitedFeedbackEnabled);
   setupDroneCountSelect();
   setupDroneResetButton();
-  // setupCrypticToggle();
   setupCustomChromaButton();
   updateModeVisibility();
   showStartButton();
