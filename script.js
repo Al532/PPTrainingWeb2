@@ -120,6 +120,7 @@ let selectedDroneCount = loadSavedDroneCountSetting();
 let dronePlayers = [];
 let recallState = createEmptyRecallState();
 let recallPlayPending = false;
+let recallPlayToken = 0;
 let currentState = {
   chromaIndex: null,
   midiNote: null,
@@ -1301,6 +1302,8 @@ async function startTrial(attempt = 0) {
 async function startRecognizeTrial(attempt = 0) {
   cancelNextTrialTimeout();
   resetButtonFocus();
+  recallPlayToken += 1;
+  recallPlayPending = false;
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
@@ -1354,6 +1357,8 @@ async function startRecallTrial() {
   cancelNextTrialTimeout();
   resetButtonFocus();
   clearPendingTrials();
+  recallPlayToken += 1;
+  recallPlayPending = false;
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
@@ -1461,6 +1466,7 @@ async function handleRecallPlay() {
     return;
   }
 
+  const token = recallPlayToken;
   recallPlayPending = true;
   updateReplayAvailability();
 
@@ -1472,6 +1478,11 @@ async function handleRecallPlay() {
     recallState.targetChromaIndex;
 
   const trial = await findPlayableTrialForChroma(chosenChroma, lastMidiNotePlayed);
+  if (token !== recallPlayToken) {
+    recallPlayPending = false;
+    updateReplayAvailability();
+    return;
+  }
   recallPlayPending = false;
 
   if (!trial) {
