@@ -37,6 +37,7 @@ const DRONE_MIDI_END = 59;
 const DRONE_AUDIO_EXTENSION = "mp3";
 const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
+const MIDI_RECALL_COOLDOWN_MS = 150;
 // Toggle between "mp3" or "wav" to switch the asset set without exposing UI controls.
 const DEFAULT_AUDIO_FORMAT = "mp3";
 
@@ -120,6 +121,8 @@ let selectedDroneCount = loadSavedDroneCountSetting();
 let dronePlayers = [];
 let recallState = createEmptyRecallState();
 let recallPlayPending = false;
+let recallPlayToken = 0;
+let midiIgnoreUntil = 0;
 let currentState = {
   chromaIndex: null,
   midiNote: null,
@@ -1301,6 +1304,8 @@ async function startTrial(attempt = 0) {
 async function startRecognizeTrial(attempt = 0) {
   cancelNextTrialTimeout();
   resetButtonFocus();
+  recallPlayToken += 1;
+  recallPlayPending = false;
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
@@ -1354,6 +1359,8 @@ async function startRecallTrial() {
   cancelNextTrialTimeout();
   resetButtonFocus();
   clearPendingTrials();
+  recallPlayToken += 1;
+  recallPlayPending = false;
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
@@ -1461,6 +1468,7 @@ async function handleRecallPlay() {
     return;
   }
 
+  const token = recallPlayToken;
   recallPlayPending = true;
   updateReplayAvailability();
 
@@ -1472,6 +1480,11 @@ async function handleRecallPlay() {
     recallState.targetChromaIndex;
 
   const trial = await findPlayableTrialForChroma(chosenChroma, lastMidiNotePlayed);
+  if (token !== recallPlayToken) {
+    recallPlayPending = false;
+    updateReplayAvailability();
+    return;
+  }
   recallPlayPending = false;
 
   if (!trial) {
@@ -1593,11 +1606,14 @@ function playLimitedFeedbackSound() {
   });
 }
 
-function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
+function handleAnswer(chosenChroma, { shouldFadeOut = true, source = "ui" } = {}) {
 
   if (!currentState.awaitingGuess) return;
 
   currentState.awaitingGuess = false;
+  if (source === "midi" && currentMode === "recall") {
+    midiIgnoreUntil = performance.now() + MIDI_RECALL_COOLDOWN_MS;
+  }
   lastClickedChromaIndex = chosenChroma;
   currentTrial = null;
   if (feedbackResetTimeout) {
@@ -1824,6 +1840,7 @@ function handleMidiMessage(message) {
   const [status, data1, data2] = message.data;
   const isNoteOn = (status & 0xf0) === 0x90 && data2 > 0;
   if (!isNoteOn) return;
+  if (performance.now() < midiIgnoreUntil) return;
   if (
     currentMode === "recall" &&
     recallState?.targetChromaIndex != null &&
@@ -1839,7 +1856,7 @@ function handleMidiMessage(message) {
   }
   const chromaIndex = data1 % 12;
 
-  handleAnswer(chromaIndex);
+  handleAnswer(chromaIndex, { source: "midi" });
 }
 
 function getDroneAudioSrc(chromaIndex) {
