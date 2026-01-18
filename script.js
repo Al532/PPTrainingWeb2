@@ -487,10 +487,13 @@ function updateModeVisibility() {
   const isRecall = currentMode === "recall";
   if (answerSetRow) answerSetRow.hidden = isRecall;
   if (droneRow) droneRow.hidden = false;
-  if (reducedRangeRow) reducedRangeRow.hidden = isRecall;
+  if (reducedRangeRow) reducedRangeRow.hidden = false;
   if (precisionRow) precisionRow.hidden = !isRecall;
   if (chromaSetRow) chromaSetRow.hidden = false;
   if (feedbackRow) feedbackRow.hidden = isRecall;
+  if (isRecall && limitedFeedbackEnabled) {
+    setLimitedFeedbackEnabled(false);
+  }
   updateReplayLabel();
 }
 

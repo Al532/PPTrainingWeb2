@@ -10,7 +10,7 @@
 <body>
   <header>
     <h1>Perfect Pitch Training</h1>
-    <p>Listen to the played sample, then identify the chroma by clicking a button or playing the matching note on your MIDI keyboard.</p>
+    <p>Listen to the played sample, then identify the chroma by clicking a button or playing the matching note on your MIDI keyboard. Recall mode asks you to match the prompted chroma after hearing a note.</p>
   </header>
 
   <main>
@@ -25,13 +25,16 @@
         <label for="mode-select">Mode</label>
         <select id="mode-select"></select>
       </div>
-      <div class="controls-row" id="precision-row">
-        <label for="precision-select">Precision</label>
-        <select id="precision-select"></select>
-      </div>
       <div class="controls-row" id="chroma-set-row">
         <label for="chroma-set-select">Chroma set</label>
         <select id="chroma-set-select"></select>
+      </div>
+      <div class="controls-row custom-row" id="custom-chroma-row">
+        <button type="button" id="custom-chroma-button" class="secondary-button">Custom chroma set</button>
+      </div>
+      <div class="controls-row" id="precision-row">
+        <label for="precision-select">Precision</label>
+        <select id="precision-select"></select>
       </div>
       <div class="controls-row" id="answer-set-row">
         <label for="answer-set-select">Answer set</label>
@@ -41,9 +44,6 @@
         <label for="drone-count-select">Drones</label>
         <select id="drone-count-select"></select>
         <button type="button" id="drone-reset-button" class="secondary-button">Reset drones</button>
-      </div>
-      <div class="controls-row custom-row" id="custom-chroma-row">
-        <button type="button" id="custom-chroma-button" class="secondary-button">Custom chroma set</button>
       </div>
       <div class="controls-row toggle-row" id="reduced-range-row">
         <label class="checkbox-label">
