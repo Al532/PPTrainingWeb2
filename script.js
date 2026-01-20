@@ -199,6 +199,60 @@ function getRecallOptions(targetChromaIndex, semitones) {
   return Array.from(new Set(values));
 }
 
+function getRecallExclusionSet() {
+  const excluded = new Set();
+  if (Number.isInteger(recallState?.targetChromaIndex)) {
+    excluded.add(recallState.targetChromaIndex);
+  }
+  if (Number.isInteger(recallState?.playedChromaIndex)) {
+    excluded.add(recallState.playedChromaIndex);
+  }
+  return excluded;
+}
+
+function pickRandomChromaExcluding(excludedIndices) {
+  if (!activeChromaSet || !activeChromaSet.chromas.length) return null;
+  const eligible = activeChromaSet.chromas
+    .map((chroma) => chroma.index)
+    .filter((index) => !excludedIndices.has(index));
+  if (!eligible.length) return pickRandomChroma();
+  const idx = Math.floor(Math.random() * eligible.length);
+  return eligible[idx];
+}
+
+function pickRecallTargetExcluding(excludedIndices, semitones) {
+  if (!activeChromaSet || !activeChromaSet.chromas.length) return null;
+  const candidates = activeChromaSet.chromas
+    .map((chroma) => chroma.index)
+    .filter((index) => !excludedIndices.has(index));
+  const eligible = candidates.filter((index) => {
+    const options = getRecallOptions(index, semitones);
+    return options.length && options.every((option) => !excludedIndices.has(option));
+  });
+  if (!eligible.length) return null;
+  const idx = Math.floor(Math.random() * eligible.length);
+  return eligible[idx];
+}
+
+function buildRecallOptionsExcluding(targetChromaIndex, semitones, excludedIndices) {
+  const baseOptions = getRecallOptions(targetChromaIndex, semitones);
+  if (!excludedIndices?.size) return baseOptions;
+
+  const filtered = baseOptions.filter((index) => !excludedIndices.has(index));
+  if (filtered.length === baseOptions.length) return baseOptions;
+
+  const fallbackPool = chromas
+    .map((chroma) => chroma.index)
+    .filter((index) => !excludedIndices.has(index) && !filtered.includes(index));
+
+  while (filtered.length < 3 && fallbackPool.length) {
+    const idx = Math.floor(Math.random() * fallbackPool.length);
+    filtered.push(fallbackPool.splice(idx, 1)[0]);
+  }
+
+  return filtered;
+}
+
 function normalizeAnswerSetType(answerSet = "") {
   const normalized = normalizeExerciseType(answerSet);
   if (!normalized) return "";
@@ -1363,7 +1417,10 @@ async function startRecallTrial() {
   }
 
   const precisionConfig = getRecallPrecisionConfig();
-  const targetChromaIndex = pickRandomChroma();
+  const excludedRecallNotes = getRecallExclusionSet();
+  const targetChromaIndex =
+    pickRecallTargetExcluding(excludedRecallNotes, precisionConfig.semitones) ??
+    pickRandomChromaExcluding(excludedRecallNotes);
   if (targetChromaIndex == null) {
     currentState.awaitingGuess = false;
     currentTrial = null;
@@ -1374,7 +1431,11 @@ async function startRecallTrial() {
   recallState = {
     ...createEmptyRecallState(),
     targetChromaIndex,
-    options: getRecallOptions(targetChromaIndex, precisionConfig.semitones),
+    options: buildRecallOptionsExcluding(
+      targetChromaIndex,
+      precisionConfig.semitones,
+      excludedRecallNotes
+    ),
     precisionLabel: precisionConfig.label,
     precisionSemitones: precisionConfig.semitones,
   };
