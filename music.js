@@ -64,7 +64,7 @@ const baseChromaSets = [
 
 export const chromaSets = baseChromaSets.map((set) => ({
   ...set,
-  label: `${set.name}: ${set.notes.join(", ")}`,
+  label: set.name === "Chromatic" ? "Chromatic" : `${set.name}: ${set.notes.join(", ")}`,
   chromas: set.notes.map((note) => ({ label: note, index: chromaLookup[note] })),
 }));
 
