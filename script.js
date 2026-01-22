@@ -712,6 +712,18 @@ function createRecallButtons(
   });
 }
 
+function scrollRecallButtonsIntoView() {
+  if (!buttonsContainer) return;
+  requestAnimationFrame(() => {
+    const lastButton = buttonsContainer.lastElementChild;
+    if (lastButton?.scrollIntoView) {
+      lastButton.scrollIntoView({ block: "end", inline: "nearest", behavior: "smooth" });
+      return;
+    }
+    window.scrollTo({ top: document.documentElement.scrollHeight });
+  });
+}
+
 function renderRecallMessage() {
   if (!recallMessage) return;
   if (recallState?.targetChromaIndex == null) {
@@ -1563,6 +1575,7 @@ async function handleRecallPlay() {
     targetChromaIndex: recallState.targetChromaIndex,
     semitones: recallState.precisionSemitones,
   });
+  scrollRecallButtonsIntoView();
   updateReplayAvailability();
   playPreparedTrial(trial);
 }
