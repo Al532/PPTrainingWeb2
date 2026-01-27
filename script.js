@@ -738,15 +738,13 @@ function createRecallButtons(
   });
 }
 
-function scrollRecallButtonsIntoView() {
+function scrollButtonsToBottom() {
   if (!buttonsContainer) return;
   requestAnimationFrame(() => {
-    const lastButton = buttonsContainer.lastElementChild;
-    if (lastButton?.scrollIntoView) {
-      lastButton.scrollIntoView({ block: "end", inline: "nearest", behavior: "smooth" });
-      return;
-    }
-    window.scrollTo({ top: document.documentElement.scrollHeight });
+    window.scrollTo({
+      top: document.documentElement.scrollHeight,
+      behavior: "smooth",
+    });
   });
 }
 
@@ -838,6 +836,7 @@ function refreshButtonOrder() {
 
   const chromasForButtons = getChromasForTrial(currentState.chromaIndex);
   createButtons(chromasForButtons);
+  scrollButtonsToBottom();
 }
 
 function handleStartClick() {
@@ -1392,6 +1391,7 @@ async function startRecognizeTrial(attempt = 0) {
 
   const trialChromas = getChromasForTrial(trial.chromaIndex);
   createButtons(trialChromas);
+  scrollButtonsToBottom();
 
   currentState = {
     chromaIndex: trial.chromaIndex,
@@ -1623,7 +1623,7 @@ async function handleRecallPlay() {
     targetChromaIndex: recallState.targetChromaIndex,
     semitones: recallState.precisionSemitones,
   });
-  scrollRecallButtonsIntoView();
+  scrollButtonsToBottom();
   updateReplayAvailability();
   playPreparedTrial(trial);
 }
