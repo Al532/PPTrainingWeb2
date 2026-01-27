@@ -1,7 +1,9 @@
 import {
   appendTrialLog,
   getTrialLog,
+  getSetting,
   replaceTrialLog,
+  setSetting,
 } from "./storage/indexedDbStore.js";
 
 export function formatTrialDate(date) {
@@ -15,8 +17,35 @@ export function formatTrialDate(date) {
 let trialLog = [];
 let nextTrialNumber = 1;
 
+async function migrateTrialLogFromLocalStorage() {
+  const migrationKey = "migration:trialLog";
+  try {
+    const hasMigrated = await getSetting(migrationKey);
+    if (hasMigrated) return;
+
+    const legacyPayload = localStorage.getItem("ppt-trial-log");
+    if (!legacyPayload) return;
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse(legacyPayload);
+    } catch (error) {
+      return;
+    }
+
+    if (!Array.isArray(parsed)) return;
+
+    await replaceTrialLog(parsed);
+    localStorage.removeItem("ppt-trial-log");
+    await setSetting(migrationKey, true);
+  } catch (error) {
+    // Ignore migration errors to avoid blocking stats.
+  }
+}
+
 export async function loadTrialLog() {
   try {
+    await migrateTrialLogFromLocalStorage();
     const entries = await getTrialLog();
     if (!Array.isArray(entries) || !entries.length) return;
 
