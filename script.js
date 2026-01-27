@@ -60,6 +60,7 @@ const ANSWER_SET_PRIORITY = [
 const MODES = [
   { value: "recognize", label: "Recognize" },
   { value: "recall", label: "Recall" },
+  { value: "discrimination", label: "Discrimination" },
 ];
 
 const RECALL_PRECISION_OPTIONS = [
@@ -160,6 +161,9 @@ function normalizeExerciseType(type = "") {
 function getCurrentExerciseType() {
   if (currentMode === "recall") {
     return "Recall";
+  }
+  if (currentMode === "discrimination") {
+    return "Discrimination";
   }
   return (
     normalizeExerciseType(
@@ -342,7 +346,7 @@ function getActiveDroneLabels() {
 }
 
 function getDroneChromaPool() {
-  if (currentMode === "recall") {
+  if (currentMode === "recall" || currentMode === "discrimination") {
     return chromas.map((chroma) => chroma.index);
   }
   return activeChromaSet?.chromas?.map((chroma) => chroma.index) ?? [];
@@ -460,14 +464,14 @@ function renderPrecisionOptions(selectedValue = recallPrecisionValue) {
 }
 
 function updateModeVisibility() {
-  const isRecall = currentMode === "recall";
-  if (answerSetRow) answerSetRow.hidden = isRecall;
+  const isRecallLike = currentMode === "recall" || currentMode === "discrimination";
+  if (answerSetRow) answerSetRow.hidden = isRecallLike;
   if (droneRow) droneRow.hidden = false;
   if (reducedRangeRow) reducedRangeRow.hidden = false;
-  if (precisionRow) precisionRow.hidden = !isRecall;
+  if (precisionRow) precisionRow.hidden = !isRecallLike;
   if (chromaSetRow) chromaSetRow.hidden = false;
-  if (feedbackRow) feedbackRow.hidden = isRecall;
-  if (isRecall && limitedFeedbackEnabled) {
+  if (feedbackRow) feedbackRow.hidden = isRecallLike;
+  if (isRecallLike && limitedFeedbackEnabled) {
     setLimitedFeedbackEnabled(false);
   }
   updateReplayLabel();
@@ -504,7 +508,7 @@ function setRecallPrecision(value, { skipSave = false } = {}) {
   if (!skipSave) {
     saveRecallPrecisionSelection(resolvedValue);
   }
-  if (currentMode === "recall") {
+  if (currentMode === "recall" || currentMode === "discrimination") {
     showStartButton();
   }
 }
@@ -748,6 +752,11 @@ function scrollRecallButtonsIntoView() {
 
 function renderRecallMessage() {
   if (!recallMessage) return;
+  if (currentMode !== "recall") {
+    recallMessage.hidden = true;
+    recallMessage.textContent = "";
+    return;
+  }
   if (recallState?.targetChromaIndex == null) {
     recallMessage.hidden = true;
     recallMessage.textContent = "";
@@ -824,7 +833,7 @@ function resetTrialState() {
 }
 
 function refreshButtonOrder() {
-  if (currentMode === "recall") return;
+  if (currentMode === "recall" || currentMode === "discrimination") return;
   if (!currentState.awaitingGuess || currentState.chromaIndex == null) return;
 
   const chromasForButtons = getChromasForTrial(currentState.chromaIndex);
@@ -840,7 +849,7 @@ function updateReplayAvailability() {
 
   let canReplay = false;
 
-  if (currentMode === "recall") {
+  if (currentMode === "recall" || currentMode === "discrimination") {
     const hasTarget = recallState?.targetChromaIndex != null;
     const hasPlayed = recallState?.playedChromaIndex != null;
     canReplay =
@@ -858,7 +867,7 @@ function updateReplayAvailability() {
 
 function updateReplayLabel() {
   if (!replayButton) return;
-  if (currentMode === "recall") {
+  if (currentMode === "recall" || currentMode === "discrimination") {
     const shouldReplay =
       recallState?.playedChromaIndex != null && currentState.awaitingGuess;
     replayButton.textContent = shouldReplay ? "Replay" : "Play";
@@ -1342,6 +1351,9 @@ async function startTrial(attempt = 0) {
   if (currentMode === "recall") {
     return startRecallTrial();
   }
+  if (currentMode === "discrimination") {
+    return startDiscriminationTrial();
+  }
   return startRecognizeTrial(attempt);
 }
 
@@ -1438,7 +1450,7 @@ async function startRecallTrial() {
     midiNote: null,
     instrument: null,
     chromaSetLabel: activeChromaSet?.label ?? "",
-    exerciseType: "Recall",
+    exerciseType: getCurrentExerciseType(),
     answerSet: null,
     awaitingGuess: false,
   };
@@ -1446,6 +1458,61 @@ async function startRecallTrial() {
   renderRecallMessage();
   buttonsContainer.innerHTML = "";
   updateReplayAvailability();
+}
+
+async function startDiscriminationTrial() {
+  cancelNextTrialTimeout();
+  resetButtonFocus();
+  clearPendingTrials();
+
+  if (!activeChromaSet || !activeChromaSet.chromas.length) {
+    currentState.awaitingGuess = false;
+    currentTrial = null;
+    updateReplayAvailability();
+    return;
+  }
+
+  const precisionConfig = getRecallPrecisionConfig();
+  const excludedRecallNotes = getRecallExclusionSet();
+  const targetChromaIndex =
+    pickRecallTargetExcluding(excludedRecallNotes, precisionConfig.semitones) ??
+    pickRandomChromaExcluding(excludedRecallNotes);
+  if (targetChromaIndex == null) {
+    currentState.awaitingGuess = false;
+    currentTrial = null;
+    updateReplayAvailability();
+    return;
+  }
+
+  recallState = {
+    ...createEmptyRecallState(),
+    targetChromaIndex,
+    options: buildRecallOptionsExcluding(
+      targetChromaIndex,
+      precisionConfig.semitones,
+      excludedRecallNotes
+    ),
+    precisionLabel: precisionConfig.label,
+    precisionSemitones: precisionConfig.semitones,
+  };
+
+  currentState = {
+    chromaIndex: null,
+    midiNote: null,
+    instrument: null,
+    chromaSetLabel: activeChromaSet?.label ?? "",
+    exerciseType: getCurrentExerciseType(),
+    answerSet: null,
+    awaitingGuess: false,
+  };
+  currentTrial = null;
+  if (recallMessage) {
+    recallMessage.hidden = true;
+    recallMessage.textContent = "";
+  }
+  buttonsContainer.innerHTML = "";
+  updateReplayAvailability();
+  await handleRecallPlay();
 }
 
 function stopCurrentAudio() {
@@ -1546,7 +1613,7 @@ async function handleRecallPlay() {
     midiNote: trial.midiNote,
     instrument: trial.instrument,
     chromaSetLabel: activeChromaSet?.label ?? "",
-    exerciseType: "Recall",
+    exerciseType: getCurrentExerciseType(),
     answerSet: null,
     awaitingGuess: true,
   };
@@ -1568,7 +1635,7 @@ function replayCurrentTrial() {
 }
 
 function handleReplayClick() {
-  if (currentMode === "recall") {
+  if (currentMode === "recall" || currentMode === "discrimination") {
     handleRecallPlay();
     return;
   }
@@ -1754,7 +1821,7 @@ function clearPendingTrials() {
 }
 
 async function preparePendingTrial() {
-  if (currentMode === "recall") return null;
+  if (currentMode === "recall" || currentMode === "discrimination") return null;
   if (pendingTrials.length >= PREFETCH_TRIAL_COUNT) return pendingTrials[0];
   if (pendingPreparationPromise) return pendingPreparationPromise;
 
