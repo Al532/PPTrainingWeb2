@@ -144,6 +144,8 @@ let fadeTimeout = null;
 let statsPanelOpen = false;
 let currentTrial = null;
 let customButtonHome = customChromaRow;
+let trialLogReady = Promise.resolve();
+let isTrialLogLoaded = false;
 const audioFormats = {
   mp3: { label: "MP3", folder: "MP3", extension: "mp3" },
   wav: { label: "WAV", folder: "WAV", extension: "wav" },
@@ -281,14 +283,31 @@ function getValidAnswerSetValue(value, exerciseType = getCurrentExerciseType()) 
   return "Auto";
 }
 
-const renderStats = () =>
+const renderStats = () => {
+  if (!isTrialLogLoaded) {
+    trialLogReady.then(() => {
+      renderStatsUtil({
+        statsOutput,
+        getCurrentExerciseType,
+        recentEntriesCount: RECENT_ENTRIES,
+      });
+    });
+    return;
+  }
   renderStatsUtil({
     statsOutput,
     getCurrentExerciseType,
     recentEntriesCount: RECENT_ENTRIES,
   });
+};
 
 function refreshStatsIfOpen() {
+  if (!isTrialLogLoaded) {
+    trialLogReady.then(() => {
+      refreshStatsIfOpenUtil(statsPanelOpen, renderStats);
+    });
+    return;
+  }
   refreshStatsIfOpenUtil(statsPanelOpen, renderStats);
 }
 
@@ -1652,7 +1671,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
       ? getChromaLabelByIndex(recallState.targetChromaIndex)
       : "";
 
-  logTrialResult({
+  void logTrialResult({
     chromaSetLabel: currentState.chromaSetLabel,
     targetChromaLabel: getChromaLabelByIndex(currentState.chromaIndex),
     midiNote: currentState.midiNote,
@@ -2162,7 +2181,14 @@ function getDroneGainForCount(count) {
 }
 
 async function init() {
-  await loadTrialLog();
+  trialLogReady = loadTrialLog()
+    .then(() => {
+      isTrialLogLoaded = true;
+    })
+    .catch(() => {
+      isTrialLogLoaded = true;
+    });
+  await trialLogReady;
   setupModeSelect();
   setupPrecisionSelect();
   populateChromaSetSelect();
