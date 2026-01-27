@@ -1,3 +1,9 @@
+import {
+  appendTrialLog,
+  getTrialLog,
+  replaceTrialLog,
+} from "./storage/indexedDbStore.js";
+
 export function formatTrialDate(date) {
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -9,40 +15,38 @@ export function formatTrialDate(date) {
 let trialLog = [];
 let nextTrialNumber = 1;
 
-export function loadTrialLog(storageKey) {
+export async function loadTrialLog() {
   try {
-    const serialized = localStorage.getItem(storageKey);
-    if (!serialized) return;
+    const entries = await getTrialLog();
+    if (!Array.isArray(entries) || !entries.length) return;
 
-    const parsed = JSON.parse(serialized);
-    if (Array.isArray(parsed)) {
-      trialLog = parsed.filter((entry) => typeof entry === "object" && entry !== null);
-      const highestTrialNumber = trialLog.reduce((max, entry) => {
-        const number = Number(entry.trialNumber);
-        return Number.isFinite(number) ? Math.max(max, number) : max;
-      }, 0);
-      nextTrialNumber = highestTrialNumber + 1;
-    }
+    trialLog = entries.filter((entry) => typeof entry === "object" && entry !== null);
+    const highestTrialNumber = trialLog.reduce((max, entry) => {
+      const number = Number(entry.trialNumber);
+      return Number.isFinite(number) ? Math.max(max, number) : max;
+    }, 0);
+    nextTrialNumber = highestTrialNumber + 1;
   } catch (error) {
     trialLog = [];
     nextTrialNumber = 1;
   }
 }
 
-export function persistTrialLog(storageKey) {
+export async function persistTrialLog(entries) {
+  const payload = Array.isArray(entries) ? entries : trialLog;
   try {
-    localStorage.setItem(storageKey, JSON.stringify(trialLog));
+    await replaceTrialLog(payload);
   } catch (error) {
     // Ignore storage errors to avoid disrupting the session.
   }
 }
 
-export function logTrialResult(entry, { storageKey }) {
+export function logTrialResult(entry) {
   const trialDate = formatTrialDate(new Date());
   const logEntry = { ...entry, trialNumber: nextTrialNumber, trialDate };
   trialLog.push(logEntry);
   nextTrialNumber += 1;
-  persistTrialLog(storageKey);
+  void appendTrialLog(logEntry);
 }
 
 export function calculateAccuracy(entries) {

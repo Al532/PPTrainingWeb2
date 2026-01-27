@@ -13,6 +13,7 @@ import {
   refreshStatsIfOpen as refreshStatsIfOpenUtil,
   renderStats as renderStatsUtil,
 } from "./stats.js";
+import { getSetting, setSetting } from "./storage/indexedDbStore.js";
 const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
@@ -96,27 +97,27 @@ const feedbackToggle = document.getElementById("feedback-toggle");
 const replayButton = document.getElementById("replay-button");
 const replayRow = document.getElementById("replay-row");
 
-let reducedRangeEnabled = loadSavedReducedRangeSetting();
+let reducedRangeEnabled = false;
 let midiRange = getRangeForSetting(reducedRangeEnabled);
 let notesByChroma = buildNotesByChroma(midiRange);
 const availabilityCache = new Map();
 const CUSTOM_CHROMA_SET_VALUE = "custom";
 let activeChromaSet = chromaSets[0];
 let activeChromaSetValue = "0";
-let activeAnswerSet = loadSavedAnswerSet();
-let randomizeButtonsEnabled = loadSavedRandomizeButtonsSetting();
+let activeAnswerSet = "Auto";
+let randomizeButtonsEnabled = false;
 let randomizedButtonOrder = [];
 let randomizedButtonOrderTrialCount = 0;
-let customChromaSelection = loadSavedCustomChromaSelection();
+let customChromaSelection = chromas.map((chroma) => chroma.index);
 let customChromaSet = buildCustomChromaSet(customChromaSelection);
 let isCustomSelectionOpen = false;
 let pendingCustomSelection = new Set(customChromaSelection);
 let audioFormat = DEFAULT_AUDIO_FORMAT;
 let lastClickedChromaIndex = null;
-let limitedFeedbackEnabled = loadSavedLimitedFeedbackSetting();
-let currentMode = loadSavedMode();
-let recallPrecisionValue = loadSavedRecallPrecision();
-let selectedDroneCount = loadSavedDroneCountSetting();
+let limitedFeedbackEnabled = false;
+let currentMode = "recognize";
+let recallPrecisionValue = RECALL_PRECISION_OPTIONS[0]?.value ?? "fourth";
+let selectedDroneCount = 0;
 let dronePlayers = [];
 let recallState = createEmptyRecallState();
 let recallPlayPending = false;
@@ -394,12 +395,14 @@ function setupRandomizeButtonsToggle() {
   });
 }
 
-function setLimitedFeedbackEnabled(isEnabled) {
+function setLimitedFeedbackEnabled(isEnabled, { skipSave = false } = {}) {
   limitedFeedbackEnabled = Boolean(isEnabled);
   if (feedbackToggle) {
     feedbackToggle.checked = limitedFeedbackEnabled;
   }
-  saveLimitedFeedbackSetting(limitedFeedbackEnabled);
+  if (!skipSave) {
+    saveLimitedFeedbackSetting(limitedFeedbackEnabled);
+  }
   if (limitedFeedbackEnabled) {
     resetButtonStates();
   }
@@ -878,157 +881,61 @@ function buildCustomChromaSet(selection = []) {
   };
 }
 
-function loadSavedCustomChromaSelection() {
-  try {
-    const storedValue = localStorage.getItem(CUSTOM_CHROMA_STORAGE_KEY);
-    if (storedValue) {
-      const parsed = JSON.parse(storedValue);
-      if (Array.isArray(parsed) && parsed.length) {
-        return parsed
-          .map((value) => Number.parseInt(value, 10))
-          .filter((value) => Number.isInteger(value))
-          .sort((a, b) => a - b);
-      }
-    }
-  } catch (error) {
-    // Ignore storage errors and fall back to defaults.
-  }
+function parseBooleanSetting(value, fallback = false) {
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  return fallback;
+}
 
-  return chromas.map((chroma) => chroma.index);
+function parseNumberSetting(value, fallback = 0) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) ? parsed : fallback;
+}
+
+function parseCustomChromaSelection(value) {
+  let parsedValue = value;
+  if (typeof value === "string") {
+    try {
+      parsedValue = JSON.parse(value);
+    } catch (error) {
+      parsedValue = null;
+    }
+  }
+  if (!Array.isArray(parsedValue) || !parsedValue.length) {
+    return chromas.map((chroma) => chroma.index);
+  }
+  return parsedValue
+    .map((entry) => Number.parseInt(entry, 10))
+    .filter((entry) => Number.isInteger(entry))
+    .sort((a, b) => a - b);
 }
 
 function saveCustomChromaSelection(selection) {
-  try {
-    localStorage.setItem(CUSTOM_CHROMA_STORAGE_KEY, JSON.stringify(selection));
-  } catch (error) {
-    // Ignore storage errors; the selection just won't persist.
-  }
-}
-
-function loadSavedReducedRangeSetting() {
-  try {
-    const storedValue = localStorage.getItem(REDUCED_RANGE_STORAGE_KEY);
-    if (storedValue === "true") return true;
-    if (storedValue === "false") return false;
-  } catch (error) {
-    // Ignore storage errors and fall back to defaults.
-  }
-
-  return false;
-}
-
-function loadSavedRandomizeButtonsSetting() {
-  try {
-    const storedValue = localStorage.getItem(RANDOMIZE_BUTTON_ORDER_KEY);
-    if (storedValue === "true") return true;
-    if (storedValue === "false") return false;
-  } catch (error) {
-    // Ignore storage errors and fall back to defaults.
-  }
-
-  return false;
-}
-
-function loadSavedDroneCountSetting() {
-  try {
-    const storedValue = localStorage.getItem(DRONE_COUNT_STORAGE_KEY);
-    if (storedValue !== null) {
-      const parsed = Number.parseInt(storedValue, 10);
-      if (Number.isInteger(parsed) && parsed >= 0) {
-        return parsed;
-      }
-    }
-  } catch (error) {
-    // Ignore storage errors and fall back to defaults.
-  }
-
-  return 0;
-}
-
-function loadSavedLimitedFeedbackSetting() {
-  try {
-    const storedValue = localStorage.getItem(LIMITED_FEEDBACK_STORAGE_KEY);
-    if (storedValue === "true") return true;
-    if (storedValue === "false") return false;
-  } catch (error) {
-    // Ignore storage errors and fall back to defaults.
-  }
-
-  return false;
-}
-
-function loadSavedMode() {
-  try {
-    const storedValue = localStorage.getItem(LAST_MODE_STORAGE_KEY);
-    if (MODES.some((mode) => mode.value === storedValue)) {
-      return storedValue;
-    }
-  } catch (error) {
-    // Ignore storage errors and fall back to default.
-  }
-
-  return "recognize";
-}
-
-function loadSavedRecallPrecision() {
-  try {
-    const storedValue = localStorage.getItem(LAST_RECALL_PRECISION_KEY);
-    if (RECALL_PRECISION_OPTIONS.some((option) => option.value === storedValue)) {
-      return storedValue;
-    }
-  } catch (error) {
-    // Ignore storage errors and fall back to default.
-  }
-
-  return RECALL_PRECISION_OPTIONS[0]?.value ?? "fourth";
+  void setSetting(CUSTOM_CHROMA_STORAGE_KEY, selection);
 }
 
 function saveReducedRangeSetting(isReduced) {
-  try {
-    localStorage.setItem(REDUCED_RANGE_STORAGE_KEY, isReduced ? "true" : "false");
-  } catch (error) {
-    // Ignore storage errors; the setting just won't persist.
-  }
+  void setSetting(REDUCED_RANGE_STORAGE_KEY, isReduced ? "true" : "false");
 }
 
 function saveRandomizeButtonsSetting(isRandomized) {
-  try {
-    localStorage.setItem(RANDOMIZE_BUTTON_ORDER_KEY, isRandomized ? "true" : "false");
-  } catch (error) {
-    // Ignore storage errors; the setting just won't persist.
-  }
+  void setSetting(RANDOMIZE_BUTTON_ORDER_KEY, isRandomized ? "true" : "false");
 }
 
 function saveDroneCountSetting(count) {
-  try {
-    localStorage.setItem(DRONE_COUNT_STORAGE_KEY, String(count));
-  } catch (error) {
-    // Ignore storage errors; the setting just won't persist.
-  }
+  void setSetting(DRONE_COUNT_STORAGE_KEY, String(count));
 }
 
 function saveLimitedFeedbackSetting(isLimited) {
-  try {
-    localStorage.setItem(LIMITED_FEEDBACK_STORAGE_KEY, isLimited ? "true" : "false");
-  } catch (error) {
-    // Ignore storage errors; the setting just won't persist.
-  }
+  void setSetting(LIMITED_FEEDBACK_STORAGE_KEY, isLimited ? "true" : "false");
 }
 
 function saveModeSelection(value) {
-  try {
-    localStorage.setItem(LAST_MODE_STORAGE_KEY, String(value));
-  } catch (error) {
-    // Ignore storage errors; the setting just won't persist.
-  }
+  void setSetting(LAST_MODE_STORAGE_KEY, String(value));
 }
 
 function saveRecallPrecisionSelection(value) {
-  try {
-    localStorage.setItem(LAST_RECALL_PRECISION_KEY, String(value));
-  } catch (error) {
-    // Ignore storage errors; the setting just won't persist.
-  }
+  void setSetting(LAST_RECALL_PRECISION_KEY, String(value));
 }
 
 function getChromaSetOptions() {
@@ -1055,7 +962,11 @@ function renderChromaSetOptions(selectedValue, { skipActivation = false } = {}) 
   }
 }
 
-function renderAnswerSetOptions({ selectedValue = activeAnswerSet, exerciseType } = {}) {
+function renderAnswerSetOptions({
+  selectedValue = activeAnswerSet,
+  exerciseType,
+  skipSave = false,
+} = {}) {
   if (!answerSetSelect) return;
   const effectiveExerciseType = exerciseType ?? getCurrentExerciseType();
   const available = getAvailableAnswerSetsForExercise(effectiveExerciseType);
@@ -1071,7 +982,9 @@ function renderAnswerSetOptions({ selectedValue = activeAnswerSet, exerciseType 
 
   answerSetSelect.value = resolvedValue;
   activeAnswerSet = resolvedValue;
-  saveAnswerSetSelection(resolvedValue);
+  if (!skipSave) {
+    saveAnswerSetSelection(resolvedValue);
+  }
 }
 
 function handleChromaSetChange(event) {
@@ -1110,51 +1023,93 @@ function getValidChromaSetValue(value) {
   return "0";
 }
 
-function loadSavedChromaSetValue() {
-  try {
-    const storedValue = localStorage.getItem(LAST_CHROMA_SET_KEY);
-    if (storedValue === CUSTOM_CHROMA_SET_VALUE) {
-      return storedValue;
-    }
+function normalizeStoredChromaSetValue(storedValue) {
+  if (storedValue === CUSTOM_CHROMA_SET_VALUE) {
+    return storedValue;
+  }
 
-    const parsed = Number.parseInt(storedValue ?? "", 10);
-    if (Number.isInteger(parsed) && chromaSets[parsed]) {
-      return String(parsed);
-    }
-  } catch (error) {
-    // Ignore storage errors and fall back to default.
+  const parsed = Number.parseInt(storedValue ?? "", 10);
+  if (Number.isInteger(parsed) && chromaSets[parsed]) {
+    return String(parsed);
   }
 
   return "0";
 }
 
-function loadSavedAnswerSet() {
-  try {
-    const storedValue = localStorage.getItem(LAST_ANSWER_SET_KEY);
-    if (storedValue && ANSWER_SET_TYPES.includes(storedValue)) {
-      return storedValue;
-    }
-  } catch (error) {
-    // Ignore storage errors and fall back to default.
-  }
-
-  return "Auto";
-}
-
 function saveChromaSetSelection(value) {
-  try {
-    localStorage.setItem(LAST_CHROMA_SET_KEY, String(value));
-  } catch (error) {
-    // Ignore storage errors; the selection just won't persist.
-  }
+  void setSetting(LAST_CHROMA_SET_KEY, String(value));
 }
 
 function saveAnswerSetSelection(value) {
-  try {
-    localStorage.setItem(LAST_ANSWER_SET_KEY, value);
-  } catch (error) {
-    // Ignore storage errors; the selection just won't persist.
+  void setSetting(LAST_ANSWER_SET_KEY, value);
+}
+
+async function hydrateSavedSettings() {
+  const [
+    customSelectionStored,
+    reducedRangeStored,
+    randomizeStored,
+    droneCountStored,
+    limitedFeedbackStored,
+    modeStored,
+    precisionStored,
+    chromaSetStored,
+    answerSetStored,
+  ] = await Promise.all([
+    getSetting(CUSTOM_CHROMA_STORAGE_KEY),
+    getSetting(REDUCED_RANGE_STORAGE_KEY),
+    getSetting(RANDOMIZE_BUTTON_ORDER_KEY),
+    getSetting(DRONE_COUNT_STORAGE_KEY),
+    getSetting(LIMITED_FEEDBACK_STORAGE_KEY),
+    getSetting(LAST_MODE_STORAGE_KEY),
+    getSetting(LAST_RECALL_PRECISION_KEY),
+    getSetting(LAST_CHROMA_SET_KEY),
+    getSetting(LAST_ANSWER_SET_KEY),
+  ]);
+
+  const parsedSelection = parseCustomChromaSelection(customSelectionStored);
+  updateCustomChromaSet(parsedSelection, { shouldSelectCustom: false, skipSave: true });
+
+  const resolvedLimitedFeedback = parseBooleanSetting(
+    limitedFeedbackStored,
+    limitedFeedbackEnabled
+  );
+  setLimitedFeedbackEnabled(resolvedLimitedFeedback, { skipSave: true });
+
+  const resolvedMode =
+    typeof modeStored === "string" ? modeStored : currentMode;
+  setMode(resolvedMode, { skipSave: true });
+
+  const resolvedPrecision =
+    typeof precisionStored === "string" ? precisionStored : recallPrecisionValue;
+  setRecallPrecision(resolvedPrecision, { skipSave: true });
+
+  const resolvedRange = parseBooleanSetting(reducedRangeStored, reducedRangeEnabled);
+  applyRangeSetting(resolvedRange);
+  if (reducedRangeToggle) {
+    reducedRangeToggle.checked = resolvedRange;
   }
+
+  randomizeButtonsEnabled = parseBooleanSetting(randomizeStored, randomizeButtonsEnabled);
+  if (randomizeButtonsToggle) {
+    randomizeButtonsToggle.checked = randomizeButtonsEnabled;
+  }
+  resetRandomizedButtonOrder();
+  refreshButtonOrder();
+
+  const resolvedDroneCount = parseNumberSetting(droneCountStored, selectedDroneCount);
+  setDroneCount(resolvedDroneCount, { skipSave: true });
+
+  const resolvedChromaSet = normalizeStoredChromaSetValue(chromaSetStored);
+  setActiveChromaSetByValue(resolvedChromaSet, { skipSave: true });
+
+  const resolvedAnswerSet =
+    typeof answerSetStored === "string" ? answerSetStored : activeAnswerSet;
+  renderAnswerSetOptions({
+    selectedValue: resolvedAnswerSet,
+    exerciseType: getCurrentExerciseType(),
+    skipSave: true,
+  });
 }
 
 function setActiveChromaSetByValue(value, { skipSave = false } = {}) {
@@ -1167,7 +1122,10 @@ function setActiveChromaSetByValue(value, { skipSave = false } = {}) {
   if (chromaSetSelect) {
     chromaSetSelect.value = resolvedValue;
   }
-  renderAnswerSetOptions({ exerciseType: getCurrentExerciseType() });
+  renderAnswerSetOptions({
+    exerciseType: getCurrentExerciseType(),
+    skipSave,
+  });
   populateDroneCountSelect({ selectedCount: selectedDroneCount });
   startDronePlayersForCurrentSet();
   if (!skipSave) {
@@ -1178,8 +1136,7 @@ function setActiveChromaSetByValue(value, { skipSave = false } = {}) {
 }
 
 function populateChromaSetSelect() {
-  const savedValue = loadSavedChromaSetValue();
-  renderChromaSetOptions(savedValue);
+  renderChromaSetOptions(activeChromaSetValue);
   chromaSetSelect.addEventListener("change", handleChromaSetChange);
 }
 
@@ -1190,7 +1147,10 @@ function populateAnswerSetSelect() {
   }
 }
 
-function updateCustomChromaSet(selection, { shouldSelectCustom = true } = {}) {
+function updateCustomChromaSet(
+  selection,
+  { shouldSelectCustom = true, skipSave = false } = {}
+) {
   customChromaSelection = Array.from(
     new Set(
       selection.filter(
@@ -1200,7 +1160,9 @@ function updateCustomChromaSet(selection, { shouldSelectCustom = true } = {}) {
   ).sort((a, b) => a - b);
   pendingCustomSelection = new Set(customChromaSelection);
   customChromaSet = buildCustomChromaSet(customChromaSelection);
-  saveCustomChromaSelection(customChromaSelection);
+  if (!skipSave) {
+    saveCustomChromaSelection(customChromaSelection);
+  }
   renderChromaSetOptions(activeChromaSetValue, { skipActivation: true });
   if (shouldSelectCustom) {
     setActiveChromaSetByValue(CUSTOM_CHROMA_SET_VALUE);
@@ -1690,25 +1652,22 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
       ? getChromaLabelByIndex(recallState.targetChromaIndex)
       : "";
 
-  logTrialResult(
-    {
-      chromaSetLabel: currentState.chromaSetLabel,
-      targetChromaLabel: getChromaLabelByIndex(currentState.chromaIndex),
-      midiNote: currentState.midiNote,
-      instrument: currentState.instrument,
-      userSelectedChroma: getChromaLabelByIndex(chosenChroma),
-      exerciseType: currentState.exerciseType || getCurrentExerciseType(),
-      answerSet: resolvedAnswerSet,
-      reducedRangeEnabled,
-      dronesPlayed: getActiveDroneLabels(),
-      "Limited feedback": limitedFeedbackEnabled,
-      Mode: getModeLabel(),
-      "Recall precision": recallState?.precisionLabel || "",
-      "Recall note": recallTargetLabel,
-      isCorrect,
-    },
-    { storageKey: TRIAL_LOG_STORAGE_KEY }
-  );
+  logTrialResult({
+    chromaSetLabel: currentState.chromaSetLabel,
+    targetChromaLabel: getChromaLabelByIndex(currentState.chromaIndex),
+    midiNote: currentState.midiNote,
+    instrument: currentState.instrument,
+    userSelectedChroma: getChromaLabelByIndex(chosenChroma),
+    exerciseType: currentState.exerciseType || getCurrentExerciseType(),
+    answerSet: resolvedAnswerSet,
+    reducedRangeEnabled,
+    dronesPlayed: getActiveDroneLabels(),
+    "Limited feedback": limitedFeedbackEnabled,
+    Mode: getModeLabel(),
+    "Recall precision": recallState?.precisionLabel || "",
+    "Recall note": recallTargetLabel,
+    isCorrect,
+  });
 
   refreshStatsIfOpen();
 
@@ -2016,7 +1975,7 @@ function startDronePlayersForCurrentSet() {
   });
 }
 
-function setDroneCount(count, { fadeOutMs = 0 } = {}) {
+function setDroneCount(count, { fadeOutMs = 0, skipSave = false } = {}) {
   const maxCount = getMaxDroneCount();
   const resolved = Number.isFinite(count)
     ? Math.max(0, Math.min(count, maxCount))
@@ -2026,7 +1985,9 @@ function setDroneCount(count, { fadeOutMs = 0 } = {}) {
     droneCountSelect.value = String(resolved);
   }
   updateDroneResetButtonState();
-  saveDroneCountSetting(resolved);
+  if (!skipSave) {
+    saveDroneCountSetting(resolved);
+  }
   if (fadeOutMs > 0 && dronePlayers.length) {
     stopDronePlayers({ fadeOutMs });
     setTimeout(() => startDronePlayersForCurrentSet(), fadeOutMs);
@@ -2200,8 +2161,8 @@ function getDroneGainForCount(count) {
   return Math.pow(10, totalDb / 20);
 }
 
-function init() {
-  loadTrialLog(TRIAL_LOG_STORAGE_KEY);
+async function init() {
+  await loadTrialLog();
   setupModeSelect();
   setupPrecisionSelect();
   populateChromaSetSelect();
@@ -2227,6 +2188,9 @@ function init() {
     statsOutput.hidden = true;
   }
   startDronePlayersForCurrentSet();
+  await hydrateSavedSettings();
 }
 
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener("DOMContentLoaded", () => {
+  void init();
+});
