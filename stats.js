@@ -47,7 +47,7 @@ export async function loadTrialLog() {
   try {
     await migrateTrialLogFromLocalStorage();
     const entries = await getTrialLog();
-    if (!Array.isArray(entries) || !entries.length) return;
+    if (!Array.isArray(entries) || !entries.length) return trialLog;
 
     trialLog = entries.filter((entry) => typeof entry === "object" && entry !== null);
     const highestTrialNumber = trialLog.reduce((max, entry) => {
@@ -55,10 +55,12 @@ export async function loadTrialLog() {
       return Number.isFinite(number) ? Math.max(max, number) : max;
     }, 0);
     nextTrialNumber = highestTrialNumber + 1;
+    return trialLog;
   } catch (error) {
     trialLog = [];
     nextTrialNumber = 1;
   }
+  return trialLog;
 }
 
 export async function persistTrialLog(entries) {
@@ -70,12 +72,17 @@ export async function persistTrialLog(entries) {
   }
 }
 
-export function logTrialResult(entry) {
+export async function logTrialResult(entry) {
   const trialDate = formatTrialDate(new Date());
   const logEntry = { ...entry, trialNumber: nextTrialNumber, trialDate };
   trialLog.push(logEntry);
   nextTrialNumber += 1;
-  void appendTrialLog(logEntry);
+  try {
+    await appendTrialLog(logEntry);
+  } catch (error) {
+    // Ignore storage errors to avoid disrupting the session.
+  }
+  return logEntry;
 }
 
 export function calculateAccuracy(entries) {
