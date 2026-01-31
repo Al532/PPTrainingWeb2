@@ -14,6 +14,12 @@ import {
   renderStats as renderStatsUtil,
 } from "./stats.js";
 import { getSetting, setSetting } from "./storage/indexedDbStore.js";
+import {
+  SEQUENCING_PRESETS,
+  getSequencingOverrides,
+  getSequencingPreset,
+  setSequencingOverrides,
+} from "./sequencing_config.js";
 const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
@@ -27,6 +33,7 @@ const DRONE_COUNT_STORAGE_KEY = "ppt-drone-count";
 const LIMITED_FEEDBACK_STORAGE_KEY = "ppt-limited-feedback";
 const LAST_MODE_STORAGE_KEY = "ppt-last-mode";
 const LAST_RECALL_PRECISION_KEY = "ppt-last-recall-precision";
+const SEQUENCING_POLICY_STORAGE_KEY = "ppt-sequencing-policy";
 const RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL = 5;
 const FADE_DURATION_MS = 100;
 const DRONE_CROSSFADE_START_MS = 2000;
@@ -71,11 +78,24 @@ const RECALL_PRECISION_OPTIONS = [
   { value: "minor-second", label: "Minor second", semitones: 1 },
 ];
 
+const SEQUENCING_POLICY_OPTIONS = [
+  { value: "default", label: "Default" },
+  { value: "antiRelativeChromatic", label: "Anti-relative" },
+];
+
 const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
 const modeSelect = document.getElementById("mode-select");
 const precisionSelect = document.getElementById("precision-select");
 const chromaSetSelect = document.getElementById("chroma-set-select");
+const sequencingSelect = document.getElementById("sequencing-select");
+const sequencingAdvancedToggle = document.getElementById("sequencing-advanced-toggle");
+const sequencingAdvancedPanel = document.getElementById("sequencing-advanced-panel");
+const sequencingFields = document.getElementById("sequencing-fields");
+const sequencingResetButton = document.getElementById("sequencing-reset-button");
+const sequencingExportButton = document.getElementById("sequencing-export-button");
+const sequencingImportButton = document.getElementById("sequencing-import-button");
+const sequencingJsonTextarea = document.getElementById("sequencing-json");
 const answerSetSelect = document.getElementById("answer-set-select");
 const droneCountSelect = document.getElementById("drone-count-select");
 const droneResetButton = document.getElementById("drone-reset-button");
@@ -84,6 +104,7 @@ const customChromaButtons = document.getElementById("custom-chroma-buttons");
 const customChromaPicker = document.getElementById("custom-chroma-picker");
 const customChromaRow = document.getElementById("custom-chroma-row");
 const chromaSetRow = document.getElementById("chroma-set-row");
+const sequencingRow = document.getElementById("sequencing-row");
 const answerSetRow = document.getElementById("answer-set-row");
 const droneRow = document.getElementById("drone-row");
 const reducedRangeRow = document.getElementById("reduced-range-row");
@@ -106,6 +127,10 @@ const CUSTOM_CHROMA_SET_VALUE = "custom";
 let activeChromaSet = chromaSets[0];
 let activeChromaSetValue = "0";
 let activeAnswerSet = "Auto";
+let sequencingPolicyValue = "default";
+let sequencingOverrides = getSequencingOverrides();
+let sequencingHistoryEntries = [];
+let pendingAfterWrongPolicy = false;
 let randomizeButtonsEnabled = false;
 let randomizedButtonOrder = [];
 let randomizedButtonOrderTrialCount = 0;
@@ -392,8 +417,41 @@ function applyRangeSetting(isReduced) {
   midiRange = getRangeForSetting(reducedRangeEnabled);
   notesByChroma = buildNotesByChroma(midiRange);
   lastMidiNotePlayed = null;
+  resetSequencingHistory({ keepCommitted: false });
+  pendingAfterWrongPolicy = false;
   showStartButton();
   refreshStatsIfOpen();
+}
+
+function getSequencingPolicyValue(value = sequencingPolicyValue) {
+  return SEQUENCING_POLICY_OPTIONS.some((option) => option.value === value)
+    ? value
+    : "default";
+}
+
+function getActiveSequencingPreset() {
+  return getSequencingPreset(getSequencingPolicyValue());
+}
+
+function isSequencingActive() {
+  return currentMode === "recognize" && getSequencingPolicyValue() !== "default";
+}
+
+function resetSequencingHistory({ keepCommitted = true } = {}) {
+  if (!keepCommitted) {
+    sequencingHistoryEntries = [];
+    return;
+  }
+  sequencingHistoryEntries = sequencingHistoryEntries.filter((entry) => !entry.planned);
+}
+
+function addSequencingHistoryEntry(entry) {
+  if (!entry) return;
+  sequencingHistoryEntries.push(entry);
+  const maxEntries = 200;
+  if (sequencingHistoryEntries.length > maxEntries) {
+    sequencingHistoryEntries = sequencingHistoryEntries.slice(-maxEntries);
+  }
 }
 
 function setupReducedRangeToggle() {
@@ -470,6 +528,7 @@ function updateModeVisibility() {
   if (reducedRangeRow) reducedRangeRow.hidden = false;
   if (precisionRow) precisionRow.hidden = !isRecallLike;
   if (chromaSetRow) chromaSetRow.hidden = false;
+  if (sequencingRow) sequencingRow.hidden = false;
   if (feedbackRow) feedbackRow.hidden = isRecallLike;
   if (isRecallLike && limitedFeedbackEnabled) {
     setLimitedFeedbackEnabled(false);
@@ -488,6 +547,8 @@ function setMode(modeValue, { skipSave = false } = {}) {
   updateModeVisibility();
   populateDroneCountSelect({ selectedCount: selectedDroneCount });
   startDronePlayersForCurrentSet();
+  resetSequencingHistory({ keepCommitted: false });
+  pendingAfterWrongPolicy = false;
   if (!skipSave) {
     saveModeSelection(resolvedMode);
   }
@@ -527,6 +588,327 @@ function setupPrecisionSelect() {
   precisionSelect.addEventListener("change", (event) => {
     setRecallPrecision(event.target.value);
   });
+}
+
+function renderSequencingOptions(selectedValue = sequencingPolicyValue) {
+  if (!sequencingSelect) return;
+  sequencingSelect.innerHTML = "";
+  SEQUENCING_POLICY_OPTIONS.forEach((optionConfig) => {
+    const option = document.createElement("option");
+    option.value = optionConfig.value;
+    option.textContent = optionConfig.label;
+    sequencingSelect.appendChild(option);
+  });
+  sequencingSelect.value = getSequencingPolicyValue(selectedValue);
+}
+
+function saveSequencingPolicySelection(value) {
+  void setSetting(SEQUENCING_POLICY_STORAGE_KEY, String(value));
+}
+
+function setSequencingPolicy(value, { skipSave = false } = {}) {
+  sequencingPolicyValue = getSequencingPolicyValue(value);
+  if (sequencingSelect) {
+    sequencingSelect.value = sequencingPolicyValue;
+  }
+  updateSequencingFields();
+  resetSequencingHistory({ keepCommitted: false });
+  pendingAfterWrongPolicy = false;
+  if (!skipSave) {
+    saveSequencingPolicySelection(sequencingPolicyValue);
+  }
+  showStartButton();
+}
+
+function getFieldPathParts(path) {
+  return path.split(".").map((part) => (Number.isNaN(Number(part)) ? part : Number(part)));
+}
+
+function getNestedValue(source, pathParts) {
+  return pathParts.reduce((acc, key) => (acc == null ? acc : acc[key]), source);
+}
+
+function setNestedValue(target, pathParts, value) {
+  let current = target;
+  pathParts.forEach((part, index) => {
+    if (index === pathParts.length - 1) {
+      current[part] = value;
+      return;
+    }
+    const next = current[part];
+    const shouldBeArray = Number.isInteger(pathParts[index + 1]);
+    if (next == null) {
+      current[part] = shouldBeArray ? [] : {};
+    }
+    current = current[part];
+  });
+}
+
+function removeNestedValue(target, pathParts) {
+  if (!target) return;
+  const parent = pathParts.slice(0, -1).reduce((acc, key) => {
+    if (!acc || acc[key] == null) return null;
+    return acc[key];
+  }, target);
+  if (!parent) return;
+  delete parent[pathParts[pathParts.length - 1]];
+}
+
+const SEQUENCING_FIELDS = [
+  { label: "Min abs delta", path: "minAbsDelta", type: "number", step: "1", min: "0" },
+  {
+    label: "Preferred range 1 min",
+    path: "preferredAbsDeltaRanges.0.min",
+    type: "number",
+    step: "1",
+    min: "0",
+  },
+  {
+    label: "Preferred range 1 max",
+    path: "preferredAbsDeltaRanges.0.max",
+    type: "number",
+    step: "1",
+    min: "0",
+  },
+  {
+    label: "Preferred range 1 weight",
+    path: "preferredAbsDeltaRanges.0.weight",
+    type: "number",
+    step: "0.1",
+    min: "0",
+  },
+  {
+    label: "Preferred range 2 min",
+    path: "preferredAbsDeltaRanges.1.min",
+    type: "number",
+    step: "1",
+    min: "0",
+  },
+  {
+    label: "Preferred range 2 max",
+    path: "preferredAbsDeltaRanges.1.max",
+    type: "number",
+    step: "1",
+    min: "0",
+  },
+  {
+    label: "Preferred range 2 weight",
+    path: "preferredAbsDeltaRanges.1.weight",
+    type: "number",
+    step: "0.1",
+    min: "0",
+  },
+  {
+    label: "Preferred range 3 min",
+    path: "preferredAbsDeltaRanges.2.min",
+    type: "number",
+    step: "1",
+    min: "0",
+  },
+  {
+    label: "Preferred range 3 max",
+    path: "preferredAbsDeltaRanges.2.max",
+    type: "number",
+    step: "1",
+    min: "0",
+  },
+  {
+    label: "Preferred range 3 weight",
+    path: "preferredAbsDeltaRanges.2.weight",
+    type: "number",
+    step: "0.1",
+    min: "0",
+  },
+  {
+    label: "Direction window",
+    path: "directionBalance.window",
+    type: "number",
+    step: "1",
+    min: "0",
+  },
+  { label: "Low band max", path: "registerBands.lowMax", type: "number", step: "1" },
+  { label: "High band min", path: "registerBands.highMin", type: "number", step: "1" },
+  {
+    label: "Alternate bands",
+    path: "registerBands.alternateBands",
+    type: "checkbox",
+  },
+  {
+    label: "After-wrong enabled",
+    path: "afterWrongPolicy.enabled",
+    type: "checkbox",
+  },
+  {
+    label: "After-wrong min abs delta",
+    path: "afterWrongPolicy.forceAbsDeltaMin",
+    type: "number",
+    step: "1",
+    min: "0",
+  },
+  {
+    label: "After-wrong band switch",
+    path: "afterWrongPolicy.forceBandSwitch",
+    type: "checkbox",
+  },
+  {
+    label: "Max attempts",
+    path: "maxAttemptsToFindCandidate",
+    type: "number",
+    step: "1",
+    min: "1",
+  },
+  {
+    label: "Pitch class history window",
+    path: "targetPitchClassHistoryWindow",
+    type: "number",
+    step: "1",
+    min: "0",
+  },
+  {
+    label: "Silence between trials (ms)",
+    path: "silenceMsBetweenTrials",
+    type: "number",
+    step: "50",
+    min: "0",
+  },
+  { label: "Weak weight Bb", path: "weakChromaWeights.Bb", type: "number", step: "0.1" },
+  { label: "Weak weight F#", path: "weakChromaWeights.F#", type: "number", step: "0.1" },
+  { label: "Weak weight F", path: "weakChromaWeights.F", type: "number", step: "0.1" },
+  { label: "Weak weight C#", path: "weakChromaWeights.C#", type: "number", step: "0.1" },
+  { label: "Weak weight Ab", path: "weakChromaWeights.Ab", type: "number", step: "0.1" },
+];
+
+function updateSequencingOverride(path, value) {
+  const policyName = getSequencingPolicyValue();
+  const basePreset = SEQUENCING_PRESETS[policyName] ?? SEQUENCING_PRESETS.default;
+  const overrides = sequencingOverrides ?? {};
+  const overrideForPolicy = overrides[policyName] ?? {};
+  const pathParts = getFieldPathParts(path);
+  const baseValue = getNestedValue(basePreset, pathParts);
+
+  if (value === null || value === "" || value === undefined) {
+    removeNestedValue(overrideForPolicy, pathParts);
+  } else if (value === baseValue) {
+    removeNestedValue(overrideForPolicy, pathParts);
+  } else {
+    setNestedValue(overrideForPolicy, pathParts, value);
+  }
+
+  overrides[policyName] = overrideForPolicy;
+  sequencingOverrides = overrides;
+  setSequencingOverrides(overrides);
+}
+
+function updateSequencingFields() {
+  if (!sequencingFields) return;
+  const policyName = getSequencingPolicyValue();
+  const mergedPreset = getSequencingPreset(policyName);
+
+  sequencingFields.innerHTML = "";
+  SEQUENCING_FIELDS.forEach((field) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "advanced-field";
+    const label = document.createElement("label");
+    label.textContent = field.label;
+    const input = document.createElement("input");
+    input.type = field.type || "number";
+    input.dataset.path = field.path;
+    if (field.step) input.step = field.step;
+    if (field.min != null) input.min = field.min;
+
+    const pathParts = getFieldPathParts(field.path);
+    const value = getNestedValue(mergedPreset, pathParts);
+    if (field.type === "checkbox") {
+      input.checked = Boolean(value);
+    } else {
+      input.value =
+        value === undefined || value === null || Number.isNaN(value) ? "" : String(value);
+    }
+
+    input.addEventListener("change", (event) => {
+      if (field.type === "checkbox") {
+        updateSequencingOverride(field.path, Boolean(event.target.checked));
+      } else {
+        const parsed = Number.parseFloat(event.target.value);
+        updateSequencingOverride(field.path, Number.isFinite(parsed) ? parsed : null);
+      }
+      updateSequencingFields();
+      showStartButton();
+    });
+
+    wrapper.appendChild(label);
+    wrapper.appendChild(input);
+    sequencingFields.appendChild(wrapper);
+  });
+
+  if (sequencingJsonTextarea) {
+    const overrideForPolicy = sequencingOverrides?.[policyName] ?? {};
+    sequencingJsonTextarea.value = JSON.stringify(overrideForPolicy, null, 2);
+  }
+}
+
+function handleSequencingReset() {
+  const policyName = getSequencingPolicyValue();
+  sequencingOverrides = sequencingOverrides ?? {};
+  delete sequencingOverrides[policyName];
+  setSequencingOverrides(sequencingOverrides);
+  updateSequencingFields();
+  showStartButton();
+}
+
+function handleSequencingExport() {
+  if (!sequencingJsonTextarea) return;
+  const policyName = getSequencingPolicyValue();
+  const overrideForPolicy = sequencingOverrides?.[policyName] ?? {};
+  sequencingJsonTextarea.value = JSON.stringify(overrideForPolicy, null, 2);
+}
+
+function handleSequencingImport() {
+  if (!sequencingJsonTextarea) return;
+  const policyName = getSequencingPolicyValue();
+  let parsed = null;
+  try {
+    parsed = JSON.parse(sequencingJsonTextarea.value || "{}");
+  } catch (error) {
+    alert("Invalid JSON. Please provide a valid overrides object.");
+    return;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    alert("Overrides JSON must be an object.");
+    return;
+  }
+  sequencingOverrides = sequencingOverrides ?? {};
+  sequencingOverrides[policyName] = parsed;
+  setSequencingOverrides(sequencingOverrides);
+  updateSequencingFields();
+  showStartButton();
+}
+
+function setupSequencingControls() {
+  if (!sequencingSelect) return;
+  renderSequencingOptions(sequencingPolicyValue);
+  sequencingSelect.addEventListener("change", (event) => {
+    setSequencingPolicy(event.target.value);
+  });
+
+  if (sequencingAdvancedToggle && sequencingAdvancedPanel) {
+    sequencingAdvancedToggle.addEventListener("click", () => {
+      const isHidden = sequencingAdvancedPanel.hidden;
+      sequencingAdvancedPanel.hidden = !isHidden;
+      sequencingAdvancedToggle.textContent = isHidden ? "Hide advanced" : "Advanced…";
+    });
+  }
+
+  if (sequencingResetButton) {
+    sequencingResetButton.addEventListener("click", handleSequencingReset);
+  }
+  if (sequencingExportButton) {
+    sequencingExportButton.addEventListener("click", handleSequencingExport);
+  }
+  if (sequencingImportButton) {
+    sequencingImportButton.addEventListener("click", handleSequencingImport);
+  }
+  updateSequencingFields();
 }
 
 function setupDroneCountSelect() {
@@ -1082,6 +1464,7 @@ async function hydrateSavedSettings() {
     precisionStored,
     chromaSetStored,
     answerSetStored,
+    sequencingPolicyStored,
   ] = await Promise.all([
     getSetting(CUSTOM_CHROMA_STORAGE_KEY),
     getSetting(REDUCED_RANGE_STORAGE_KEY),
@@ -1092,6 +1475,7 @@ async function hydrateSavedSettings() {
     getSetting(LAST_RECALL_PRECISION_KEY),
     getSetting(LAST_CHROMA_SET_KEY),
     getSetting(LAST_ANSWER_SET_KEY),
+    getSetting(SEQUENCING_POLICY_STORAGE_KEY),
   ]);
 
   const parsedSelection = parseCustomChromaSelection(customSelectionStored);
@@ -1137,6 +1521,10 @@ async function hydrateSavedSettings() {
     exerciseType: getCurrentExerciseType(),
     skipSave: true,
   });
+
+  const resolvedSequencingPolicy =
+    typeof sequencingPolicyStored === "string" ? sequencingPolicyStored : sequencingPolicyValue;
+  setSequencingPolicy(resolvedSequencingPolicy, { skipSave: true });
 }
 
 function setActiveChromaSetByValue(value, { skipSave = false } = {}) {
@@ -1155,6 +1543,8 @@ function setActiveChromaSetByValue(value, { skipSave = false } = {}) {
   });
   populateDroneCountSelect({ selectedCount: selectedDroneCount });
   startDronePlayersForCurrentSet();
+  resetSequencingHistory({ keepCommitted: false });
+  pendingAfterWrongPolicy = false;
   if (!skipSave) {
     saveChromaSetSelection(resolvedValue);
   }
@@ -1346,6 +1736,346 @@ function pickRandomNote(chromaIndex, excludedMidiNote) {
   return source[idx];
 }
 
+function getBandForMidi(midiNote, bands) {
+  if (!bands || !Number.isFinite(midiNote)) return null;
+  if (Number.isFinite(bands.lowMax) && midiNote <= bands.lowMax) {
+    return "low";
+  }
+  if (Number.isFinite(bands.highMin) && midiNote >= bands.highMin) {
+    return "high";
+  }
+  return null;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getDirectionBalanceWeights(historyEntries, balanceConfig) {
+  if (!balanceConfig?.window) {
+    return { up: 1, down: 1 };
+  }
+  const window = balanceConfig.window;
+  const recent = historyEntries.slice(-window);
+  const counts = recent.reduce(
+    (acc, entry) => {
+      if (entry?.direction === "up") acc.up += 1;
+      if (entry?.direction === "down") acc.down += 1;
+      return acc;
+    },
+    { up: 0, down: 0 }
+  );
+  const total = counts.up + counts.down;
+  if (!total) return { up: 1, down: 1 };
+  const desiredUp = balanceConfig.up ?? 0.5;
+  const desiredDown = balanceConfig.down ?? 0.5;
+  const upShare = counts.up / total;
+  const downShare = counts.down / total;
+  const upMultiplier = clamp(1 + (desiredUp - upShare), 0.4, 1.6);
+  const downMultiplier = clamp(1 + (desiredDown - downShare), 0.4, 1.6);
+  return { up: upMultiplier, down: downMultiplier };
+}
+
+function getDeltaWeight(absDelta, ranges = []) {
+  if (!Number.isFinite(absDelta)) return 0;
+  return ranges.reduce((weight, range) => {
+    if (
+      Number.isFinite(range?.min) &&
+      Number.isFinite(range?.max) &&
+      absDelta >= range.min &&
+      absDelta <= range.max
+    ) {
+      return weight + (range.weight ?? 0);
+    }
+    return weight;
+  }, 0);
+}
+
+function adjustCandidateToPitchClass(
+  candidate,
+  prevMidi,
+  targetPitchClass,
+  absRange,
+  allowedRange,
+  desiredDirection
+) {
+  const base = candidate;
+  const basePc = ((base % 12) + 12) % 12;
+  const diff = (targetPitchClass - basePc + 12) % 12;
+  const offsets = [diff, diff - 12, diff + 12, diff - 24, diff + 24];
+
+  for (const offset of offsets) {
+    const note = base + offset;
+    if (note < allowedRange.min || note > allowedRange.max) continue;
+    const delta = note - prevMidi;
+    const absDelta = Math.abs(delta);
+    if (absDelta < absRange.min || absDelta > absRange.max) continue;
+    if (desiredDirection) {
+      if (desiredDirection === "up" && delta <= 0) continue;
+      if (desiredDirection === "down" && delta >= 0) continue;
+    }
+    return { note, delta, absDelta };
+  }
+  return null;
+}
+
+function chooseWeightedIndex(weights = [], rng = Math.random) {
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return -1;
+  let target = rng() * total;
+  for (let i = 0; i < weights.length; i += 1) {
+    target -= weights[i];
+    if (target <= 0) return i;
+  }
+  return weights.length - 1;
+}
+
+function chooseTargetPitchClass(allowedPitchClasses, weights = {}, historyEntries = [], policy) {
+  if (!allowedPitchClasses?.length) return null;
+  const historyWindow = policy?.targetPitchClassHistoryWindow ?? 0;
+  const recentHistory =
+    historyWindow > 0 ? historyEntries.slice(-historyWindow) : [];
+  const recentCounts = recentHistory.reduce((acc, entry) => {
+    if (Number.isInteger(entry?.targetPitchClass)) {
+      acc[entry.targetPitchClass] = (acc[entry.targetPitchClass] ?? 0) + 1;
+    }
+    return acc;
+  }, {});
+
+  const candidateWeights = allowedPitchClasses.map((pitchClass) => {
+    const label = getChromaLabelByIndex(pitchClass);
+    const weightOverride =
+      weights?.[label] ??
+      weights?.[String(pitchClass)] ??
+      weights?.[pitchClass] ??
+      1;
+    const count = recentCounts[pitchClass] ?? 0;
+    const capMultiplier =
+      historyWindow > 0 ? clamp(1 - count / historyWindow, 0.2, 1) : 1;
+    return weightOverride * capMultiplier;
+  });
+
+  const index = chooseWeightedIndex(candidateWeights);
+  if (index === -1) return allowedPitchClasses[0];
+  return allowedPitchClasses[index];
+}
+
+function chooseNextMidiNote(
+  prevMidi,
+  targetPitchClass,
+  policy,
+  rng = Math.random,
+  {
+    historyEntries = [],
+    range = midiRange,
+    afterWrongActive = false,
+  } = {}
+) {
+  const notesForPitchClass = notesByChroma[targetPitchClass] ?? [];
+  if (!Number.isFinite(prevMidi)) {
+    if (!notesForPitchClass.length) return null;
+    const idx = Math.floor(rng() * notesForPitchClass.length);
+    return {
+      midiNote: notesForPitchClass[idx],
+      absDeltaFromPrev: null,
+      directionFromPrev: null,
+      chosenBand: getBandForMidi(notesForPitchClass[idx], policy?.registerBands),
+      fallbackUsed: false,
+    };
+  }
+
+  const maxAttempts = policy?.maxAttemptsToFindCandidate ?? 40;
+  const preferredRanges = policy?.preferredAbsDeltaRanges ?? [];
+  const minAbsDelta = policy?.minAbsDelta ?? 0;
+  const registerBands = policy?.registerBands ?? {};
+  const afterWrongPolicy = policy?.afterWrongPolicy ?? {};
+  const forceAbsDeltaMin = afterWrongActive
+    ? afterWrongPolicy.forceAbsDeltaMin ?? 0
+    : 0;
+  const enforceBandSwitch =
+    afterWrongActive && Boolean(afterWrongPolicy.forceBandSwitch);
+
+  const prevBand = getBandForMidi(prevMidi, registerBands);
+  const desiredBand =
+    registerBands?.alternateBands && prevBand
+      ? prevBand === "low"
+        ? "high"
+        : "low"
+      : null;
+  const directionWeights = getDirectionBalanceWeights(historyEntries, policy?.directionBalance);
+
+  const attemptFind = ({ enforceBand, relaxMinAbsDelta }) => {
+    const effectiveMinAbsDelta = relaxMinAbsDelta
+      ? 0
+      : Math.max(minAbsDelta, forceAbsDeltaMin);
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const rangeWeights = preferredRanges.map((range) => range.weight ?? 0);
+      const rangeIndex = chooseWeightedIndex(rangeWeights, rng);
+      const rangeChoice =
+        preferredRanges[rangeIndex] ??
+        preferredRanges[0] ?? { min: 0, max: 127, weight: 1 };
+      const absMin = Math.max(rangeChoice.min ?? 0, effectiveMinAbsDelta);
+      const absMax = rangeChoice.max ?? 127;
+      if (absMin > absMax) continue;
+
+      const absDelta = Math.floor(rng() * (absMax - absMin + 1)) + absMin;
+      const directionChoice =
+        chooseWeightedIndex(
+          [directionWeights.up ?? 1, directionWeights.down ?? 1],
+          rng
+        ) === 0
+          ? "up"
+          : "down";
+      const signedDelta = directionChoice === "up" ? absDelta : -absDelta;
+      const candidate = prevMidi + signedDelta;
+      if (candidate < range.min || candidate > range.max) {
+        continue;
+      }
+
+      const adjusted = adjustCandidateToPitchClass(
+        candidate,
+        prevMidi,
+        targetPitchClass,
+        { min: absMin, max: absMax },
+        range,
+        directionChoice
+      );
+      if (!adjusted) continue;
+
+      const band = getBandForMidi(adjusted.note, registerBands);
+      if (enforceBand) {
+        const needsBand =
+          enforceBandSwitch || Boolean(registerBands?.alternateBands);
+        const requiredBand = enforceBandSwitch
+          ? prevBand
+            ? prevBand === "low"
+              ? "high"
+              : "low"
+            : null
+          : desiredBand;
+        if (needsBand && requiredBand && band !== requiredBand) {
+          continue;
+        }
+      }
+
+      if (getDeltaWeight(adjusted.absDelta, preferredRanges) <= 0) {
+        continue;
+      }
+
+      return {
+        midiNote: adjusted.note,
+        absDeltaFromPrev: adjusted.absDelta,
+        directionFromPrev: adjusted.delta > 0 ? "up" : "down",
+        chosenBand: band,
+        fallbackUsed: false,
+      };
+    }
+    return null;
+  };
+
+  let candidate = attemptFind({ enforceBand: true, relaxMinAbsDelta: false });
+  if (candidate) return candidate;
+
+  candidate = attemptFind({ enforceBand: false, relaxMinAbsDelta: false });
+  if (candidate) {
+    return { ...candidate, fallbackUsed: true };
+  }
+
+  candidate = attemptFind({ enforceBand: false, relaxMinAbsDelta: true });
+  if (candidate) {
+    return { ...candidate, fallbackUsed: true };
+  }
+
+  return null;
+}
+
+window.debugGenerateTrials = (count = 500) => {
+  const total = Number.isFinite(count) ? Math.max(1, count) : 500;
+  const policyName = getSequencingPolicyValue();
+  const policy = getSequencingPreset(policyName);
+  const allowedPitchClasses = activeChromaSet?.chromas?.map((chroma) => chroma.index) ?? [];
+  const historyEntries = [];
+  const absDeltaHistogram = new Map();
+  const directionCounts = { up: 0, down: 0 };
+  const bandCounts = { low: 0, high: 0 };
+  const pitchClassCounts = new Map();
+  let fallbackUsedCount = 0;
+  let prevMidi = null;
+
+  for (let i = 0; i < total; i += 1) {
+    const targetPitchClass =
+      policyName === "default"
+        ? pickRandomChroma()
+        : chooseTargetPitchClass(
+            allowedPitchClasses,
+            policy?.weakChromaWeights ?? {},
+            historyEntries,
+            policy
+          );
+    if (targetPitchClass == null) continue;
+
+    let selection = null;
+    if (policyName === "default") {
+      const midiNote = pickRandomNote(targetPitchClass, prevMidi);
+      const delta = Number.isFinite(prevMidi) ? midiNote - prevMidi : null;
+      selection = {
+        midiNote,
+        absDeltaFromPrev: delta == null ? null : Math.abs(delta),
+        directionFromPrev: delta == null ? null : delta > 0 ? "up" : "down",
+        chosenBand: null,
+        fallbackUsed: false,
+      };
+    } else {
+      selection = chooseNextMidiNote(prevMidi, targetPitchClass, policy, Math.random, {
+        historyEntries,
+        range: midiRange,
+        afterWrongActive: false,
+      });
+    }
+
+    if (!selection) continue;
+    const absDelta = selection.absDeltaFromPrev;
+    if (Number.isFinite(absDelta)) {
+      absDeltaHistogram.set(absDelta, (absDeltaHistogram.get(absDelta) ?? 0) + 1);
+      if (selection.directionFromPrev === "up") directionCounts.up += 1;
+      if (selection.directionFromPrev === "down") directionCounts.down += 1;
+    }
+    if (selection.chosenBand === "low") bandCounts.low += 1;
+    if (selection.chosenBand === "high") bandCounts.high += 1;
+    pitchClassCounts.set(
+      targetPitchClass,
+      (pitchClassCounts.get(targetPitchClass) ?? 0) + 1
+    );
+    if (selection.fallbackUsed) fallbackUsedCount += 1;
+
+    historyEntries.push({
+      direction: selection.directionFromPrev,
+      band: selection.chosenBand,
+      absDelta,
+      targetPitchClass,
+    });
+    prevMidi = selection.midiNote;
+  }
+
+  const histogramEntries = Array.from(absDeltaHistogram.entries()).sort(
+    (a, b) => a[0] - b[0]
+  );
+  const totalDirections = directionCounts.up + directionCounts.down;
+  const totalBands = bandCounts.low + bandCounts.high;
+
+  console.log("Sequencing debug summary", {
+    policyName,
+    totalTrials: total,
+    absDeltaHistogram: histogramEntries,
+    upDownRatio:
+      totalDirections > 0 ? directionCounts.up / totalDirections : null,
+    lowHighRatio: totalBands > 0 ? bandCounts.low / totalBands : null,
+    pitchClassCounts: Array.from(pitchClassCounts.entries()).sort((a, b) => a[0] - b[0]),
+    fallbackUsedPercent: total > 0 ? (fallbackUsedCount / total) * 100 : 0,
+  });
+};
+
 async function startTrial(attempt = 0) {
   if (currentMode === "recall") {
     return startRecallTrial();
@@ -1387,6 +2117,10 @@ async function startRecognizeTrial(attempt = 0) {
     currentTrial = null;
     updateReplayAvailability();
     return;
+  }
+
+  if (trial.sequencingHistoryEntry) {
+    trial.sequencingHistoryEntry.planned = false;
   }
 
   const trialChromas = getChromasForTrial(trial.chromaIndex);
@@ -1719,6 +2453,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
 
   if (!currentState.awaitingGuess) return;
 
+  const trialSnapshot = currentTrial;
   currentState.awaitingGuess = false;
   lastClickedChromaIndex = chosenChroma;
   currentTrial = null;
@@ -1737,6 +2472,8 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     recallState?.targetChromaIndex != null
       ? getChromaLabelByIndex(recallState.targetChromaIndex)
       : "";
+  const sequencingPolicyName =
+    currentMode === "recognize" ? getSequencingPolicyValue() : "default";
 
   void logTrialResult({
     chromaSetLabel: currentState.chromaSetLabel,
@@ -1753,6 +2490,12 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     "Recall precision": recallState?.precisionLabel || "",
     "Recall note": recallTargetLabel,
     isCorrect,
+    sequencingPolicyName,
+    absDeltaFromPrev: trialSnapshot?.absDeltaFromPrev ?? null,
+    directionFromPrev: trialSnapshot?.directionFromPrev ?? null,
+    isCompound: trialSnapshot?.isCompound ?? null,
+    chosenBand: trialSnapshot?.chosenBand ?? null,
+    fallbackUsed: trialSnapshot?.fallbackUsed ?? false,
   });
 
   refreshStatsIfOpen();
@@ -1775,6 +2518,10 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
   }
 
   if (currentMode === "recognize") {
+    if (isSequencingActive() && !isCorrect) {
+      pendingAfterWrongPolicy = true;
+      clearPendingTrials();
+    }
     preparePendingTrial();
   }
 
@@ -1798,9 +2545,17 @@ function cancelNextTrialTimeout() {
   }
 }
 
+function getSequencingSilenceDelay() {
+  if (!isSequencingActive()) return 0;
+  const preset = getActiveSequencingPreset();
+  const delay = Number.parseInt(preset?.silenceMsBetweenTrials ?? 0, 10);
+  return Number.isFinite(delay) ? Math.max(0, delay) : 0;
+}
+
 function scheduleNextTrial(feedbackDuration) {
   cancelNextTrialTimeout();
-  const delayUntilNextTrial = (feedbackDuration ?? 0) + NEXT_TRIAL_DELAY;
+  const delayUntilNextTrial =
+    (feedbackDuration ?? 0) + NEXT_TRIAL_DELAY + getSequencingSilenceDelay();
   nextTrialTimeout = setTimeout(() => {
     nextTrialTimeout = null;
     startTrial();
@@ -1818,6 +2573,7 @@ function clearPendingTrials() {
   pendingTrials = [];
   pendingPreparationPromise = null;
   pendingPreparationToken += 1;
+  resetSequencingHistory({ keepCommitted: true });
 }
 
 async function preparePendingTrial() {
@@ -1853,10 +2609,77 @@ async function findPlayableTrial(attempt = 0, excludedMidiNote = null) {
   if (!activeChromaSet || !activeChromaSet.chromas.length) return null;
   if (attempt >= MAX_ATTEMPTS) return null;
 
-  const chromaIndex = pickRandomChroma();
+  const useSequencing = isSequencingActive();
+  const policyName = getSequencingPolicyValue();
+  const policy = getSequencingPreset(policyName);
+  const allowedPitchClasses = activeChromaSet.chromas.map((chroma) => chroma.index);
+  const chromaIndex = useSequencing
+    ? chooseTargetPitchClass(
+        allowedPitchClasses,
+        policy?.weakChromaWeights ?? {},
+        sequencingHistoryEntries,
+        policy
+      )
+    : pickRandomChroma();
   if (chromaIndex === null) return null;
 
-  const midiNote = pickRandomNote(chromaIndex, excludedMidiNote);
+  let midiNote = null;
+  let sequencingMeta = {
+    sequencingPolicyName: policyName,
+    absDeltaFromPrev: null,
+    directionFromPrev: null,
+    isCompound: null,
+    chosenBand: null,
+    fallbackUsed: false,
+  };
+  let sequencingEntry = null;
+
+  if (useSequencing) {
+    const afterWrongActive = pendingAfterWrongPolicy;
+    const selection = chooseNextMidiNote(
+      excludedMidiNote,
+      chromaIndex,
+      policy,
+      Math.random,
+      {
+        historyEntries: sequencingHistoryEntries,
+        range: midiRange,
+        afterWrongActive,
+      }
+    );
+    if (!selection) {
+      return findPlayableTrial(attempt + 1, excludedMidiNote);
+    }
+    pendingAfterWrongPolicy = false;
+    midiNote = selection.midiNote;
+    sequencingMeta = {
+      sequencingPolicyName: policyName,
+      absDeltaFromPrev: selection.absDeltaFromPrev,
+      directionFromPrev: selection.directionFromPrev,
+      isCompound:
+        selection.absDeltaFromPrev == null ? null : selection.absDeltaFromPrev >= 12,
+      chosenBand: selection.chosenBand,
+      fallbackUsed: selection.fallbackUsed,
+    };
+    sequencingEntry = {
+      direction: selection.directionFromPrev,
+      band: selection.chosenBand,
+      absDelta: selection.absDeltaFromPrev,
+      targetPitchClass: chromaIndex,
+      planned: true,
+    };
+  } else {
+    midiNote = pickRandomNote(chromaIndex, excludedMidiNote);
+    if (Number.isFinite(excludedMidiNote) && Number.isFinite(midiNote)) {
+      const delta = midiNote - excludedMidiNote;
+      sequencingMeta.absDeltaFromPrev = Math.abs(delta);
+      sequencingMeta.directionFromPrev = delta > 0 ? "up" : delta < 0 ? "down" : null;
+      sequencingMeta.isCompound =
+        sequencingMeta.absDeltaFromPrev == null
+          ? null
+          : sequencingMeta.absDeltaFromPrev >= 12;
+    }
+  }
   const instrument = await pickInstrumentForNote(midiNote);
 
   if (!instrument) {
@@ -1868,7 +2691,18 @@ async function findPlayableTrial(attempt = 0, excludedMidiNote = null) {
     return findPlayableTrial(attempt + 1, excludedMidiNote);
   }
 
-  return { chromaIndex, midiNote, instrument, audioElement };
+  if (sequencingEntry) {
+    addSequencingHistoryEntry(sequencingEntry);
+  }
+
+  return {
+    chromaIndex,
+    midiNote,
+    instrument,
+    audioElement,
+    sequencingHistoryEntry: sequencingEntry,
+    ...sequencingMeta,
+  };
 }
 
 async function findPlayableTrialForChroma(chromaIndex, excludedMidiNote = null, attempt = 0) {
@@ -2258,6 +3092,7 @@ async function init() {
   await trialLogReady;
   setupModeSelect();
   setupPrecisionSelect();
+  setupSequencingControls();
   populateChromaSetSelect();
   populateAnswerSetSelect();
   setupReducedRangeToggle();
