@@ -40,6 +40,32 @@
         <label for="chroma-set-select">Chroma set</label>
         <select id="chroma-set-select"></select>
       </div>
+      <div class="controls-row" id="sequencing-row">
+        <label for="sequencing-select">Sequencing</label>
+        <select id="sequencing-select"></select>
+        <button type="button" id="sequencing-advanced-toggle" class="secondary-button">
+          Advanced…
+        </button>
+      </div>
+      <div id="sequencing-advanced-panel" class="advanced-panel" hidden>
+        <div id="sequencing-fields" class="advanced-grid"></div>
+        <div class="advanced-actions">
+          <button type="button" id="sequencing-reset-button" class="secondary-button">
+            Reset to preset
+          </button>
+          <button type="button" id="sequencing-export-button" class="secondary-button">
+            Export overrides JSON
+          </button>
+          <button type="button" id="sequencing-import-button" class="secondary-button">
+            Import overrides JSON
+          </button>
+        </div>
+        <label class="advanced-label" for="sequencing-json">Overrides JSON</label>
+        <textarea id="sequencing-json" rows="6" placeholder="{}"></textarea>
+        <p class="muted small">
+          Overrides are saved locally and layered on top of the selected preset.
+        </p>
+      </div>
       <div class="controls-row custom-row" id="custom-chroma-row">
         <button type="button" id="custom-chroma-button" class="secondary-button">Custom chroma set</button>
       </div>

@@ -103,6 +103,66 @@ main {
   font-size: 1rem;
 }
 
+.advanced-panel {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 16px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.advanced-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.advanced-field label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.advanced-field input {
+  background: #0f172a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.95rem;
+}
+
+.advanced-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.advanced-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+#sequencing-json {
+  width: 100%;
+  background: #0f172a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  font-family: "SFMono-Regular", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+
 .secondary-button {
   padding: 10px 12px;
   border-radius: 10px;
@@ -250,6 +310,10 @@ main {
 
 .muted {
   color: var(--muted);
+}
+
+.small {
+  font-size: 0.9rem;
 }
 
 #start-button {
