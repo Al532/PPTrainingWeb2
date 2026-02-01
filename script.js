@@ -14,7 +14,13 @@ import {
   renderStats as renderStatsUtil,
 } from "./stats.js";
 import { exportLogs } from "./export_logs.js";
-import { getSetting, setSetting } from "./storage/indexedDbStore.js";
+import {
+  getSeriesById,
+  getSeriesList,
+  getSetting,
+  saveSeries,
+  setSetting,
+} from "./storage/indexedDbStore.js";
 const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
 const NEXT_TRIAL_DELAY = 0;
@@ -101,6 +107,17 @@ const randomizeButtonsToggle = document.getElementById("randomize-buttons-toggle
 const feedbackSelect = document.getElementById("feedback-select");
 const replayButton = document.getElementById("replay-button");
 const replayRow = document.getElementById("replay-row");
+const seriesLengthInput = document.getElementById("series-length-input");
+const seriesGenerateButton = document.getElementById("series-generate-button");
+const seriesSelect = document.getElementById("series-select");
+const seriesLoadButton = document.getElementById("series-load-button");
+const seriesPlayButton = document.getElementById("series-play-button");
+const seriesStopButton = document.getElementById("series-stop-button");
+const seriesExportButton = document.getElementById("series-export-button");
+const seriesImportButton = document.getElementById("series-import-button");
+const seriesImportInput = document.getElementById("series-import-input");
+const seriesStatus = document.getElementById("series-status");
+const seriesActivePill = document.getElementById("series-active-pill");
 
 let reducedRangeEnabled = false;
 let midiRange = getRangeForSetting(reducedRangeEnabled);
@@ -154,6 +171,14 @@ let customButtonHome = customChromaRow;
 let trialLogReady = Promise.resolve();
 let isTrialLogLoaded = false;
 let exportStatusTimeout = null;
+let seriesStatusTimeout = null;
+let seriesList = [];
+let activeSeries = null;
+let seriesPlaybackActive = false;
+let seriesPlaybackIndex = 0;
+let currentSeriesTrialIndex = null;
+let settingsLocked = false;
+let seriesPendingTrial = null;
 const audioFormats = {
   mp3: { label: "MP3", folder: "MP3", extension: "mp3" },
   wav: { label: "WAV", folder: "WAV", extension: "wav" },
@@ -390,6 +415,375 @@ function setupExportLogsButton() {
       exportLogsButton.disabled = false;
     }
   });
+}
+
+function setupSeriesControls() {
+  if (seriesGenerateButton) {
+    seriesGenerateButton.addEventListener("click", () => {
+      void handleGenerateSeries();
+    });
+  }
+  if (seriesLoadButton) {
+    seriesLoadButton.addEventListener("click", () => {
+      void handleLoadSeries();
+    });
+  }
+  if (seriesPlayButton) {
+    seriesPlayButton.addEventListener("click", handlePlaySeries);
+  }
+  if (seriesStopButton) {
+    seriesStopButton.addEventListener("click", handleStopSeries);
+  }
+  if (seriesExportButton) {
+    seriesExportButton.addEventListener("click", handleExportSeries);
+  }
+  if (seriesImportButton && seriesImportInput) {
+    seriesImportButton.addEventListener("click", () => {
+      seriesImportInput.click();
+    });
+    seriesImportInput.addEventListener("change", async (event) => {
+      const file = event.target?.files?.[0];
+      if (!file) return;
+      await handleImportSeriesFile(file);
+      seriesImportInput.value = "";
+    });
+  }
+}
+
+function updateSeriesStatus(message, { autoHide = false } = {}) {
+  if (!seriesStatus) return;
+  seriesStatus.textContent = message;
+  seriesStatus.hidden = false;
+  if (seriesStatusTimeout) {
+    clearTimeout(seriesStatusTimeout);
+  }
+  if (autoHide) {
+    seriesStatusTimeout = setTimeout(() => {
+      seriesStatus.hidden = true;
+    }, 5000);
+  }
+}
+
+function clearSeriesStatus() {
+  if (!seriesStatus) return;
+  seriesStatus.textContent = "";
+  seriesStatus.hidden = true;
+}
+
+function generateSeriesId() {
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `series-${Date.now()}-${randomPart}`;
+}
+
+function formatSeriesLabel(series) {
+  if (!series) return "Unknown series";
+  const date = series.createdAt ? new Date(series.createdAt) : null;
+  const dateLabel = date ? date.toLocaleString() : "Unknown date";
+  const count = Number.isFinite(series.trials?.length) ? series.trials.length : 0;
+  const modeLabel = getModeLabel(series.settingsSnapshot?.mode);
+  return `${dateLabel} · ${modeLabel} · ${count} trials`;
+}
+
+function updateSeriesSelectOptions({ preserveSelection = true } = {}) {
+  if (!seriesSelect) return;
+  const currentValue = preserveSelection ? seriesSelect.value : null;
+  seriesSelect.innerHTML = "";
+  if (!seriesList.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No series available";
+    seriesSelect.appendChild(option);
+    seriesSelect.value = "";
+    return;
+  }
+  seriesList.forEach((series) => {
+    const option = document.createElement("option");
+    option.value = series.id;
+    option.textContent = formatSeriesLabel(series);
+    seriesSelect.appendChild(option);
+  });
+  if (preserveSelection && currentValue) {
+    seriesSelect.value = currentValue;
+  }
+}
+
+async function loadSeriesList() {
+  try {
+    const entries = await getSeriesList();
+    seriesList = Array.isArray(entries) ? entries.sort((a, b) => {
+      const aTime = Number(a?.createdAt ?? 0);
+      const bTime = Number(b?.createdAt ?? 0);
+      return bTime - aTime;
+    }) : [];
+  } catch (error) {
+    seriesList = [];
+  }
+  updateSeriesSelectOptions({ preserveSelection: false });
+  updateSeriesControlsState();
+}
+
+function getSeriesSettingsSnapshot() {
+  return {
+    mode: currentMode,
+    chromaSetValue: activeChromaSetValue,
+    customChromaSelection: [...customChromaSelection],
+    precisionValue: recallPrecisionValue,
+    answerSet: activeAnswerSet,
+    reducedRangeEnabled,
+    randomizeButtonsEnabled,
+    droneCount: selectedDroneCount,
+    audioFormat,
+  };
+}
+
+function applySeriesSettingsSnapshot(snapshot) {
+  if (!snapshot) return;
+  if (Array.isArray(snapshot.customChromaSelection)) {
+    updateCustomChromaSet(snapshot.customChromaSelection, {
+      shouldSelectCustom: false,
+      skipSave: true,
+    });
+  }
+
+  if (typeof snapshot.mode === "string") {
+    setMode(snapshot.mode, { skipSave: true });
+  }
+  if (typeof snapshot.precisionValue === "string") {
+    setRecallPrecision(snapshot.precisionValue, { skipSave: true });
+  }
+  if (typeof snapshot.reducedRangeEnabled === "boolean") {
+    applyRangeSetting(snapshot.reducedRangeEnabled);
+    if (reducedRangeToggle) {
+      reducedRangeToggle.checked = snapshot.reducedRangeEnabled;
+    }
+  }
+  if (typeof snapshot.randomizeButtonsEnabled === "boolean") {
+    randomizeButtonsEnabled = snapshot.randomizeButtonsEnabled;
+    if (randomizeButtonsToggle) {
+      randomizeButtonsToggle.checked = snapshot.randomizeButtonsEnabled;
+    }
+    resetRandomizedButtonOrder();
+    refreshButtonOrder();
+  }
+  if (Number.isFinite(snapshot.droneCount)) {
+    setDroneCount(snapshot.droneCount, { skipSave: true });
+  }
+  if (typeof snapshot.chromaSetValue === "string") {
+    setActiveChromaSetByValue(snapshot.chromaSetValue, { skipSave: true });
+  }
+  if (typeof snapshot.answerSet === "string") {
+    renderAnswerSetOptions({
+      selectedValue: snapshot.answerSet,
+      exerciseType: getCurrentExerciseType(),
+      skipSave: true,
+    });
+  }
+  if (typeof snapshot.audioFormat === "string") {
+    audioFormat = snapshot.audioFormat;
+  }
+}
+
+function setSettingsLocked(isLocked) {
+  settingsLocked = isLocked;
+  const lockTargets = [
+    modeSelect,
+    chromaSetSelect,
+    precisionSelect,
+    answerSetSelect,
+    droneCountSelect,
+    droneResetButton,
+    reducedRangeToggle,
+    randomizeButtonsToggle,
+    feedbackSelect,
+    customChromaButton,
+  ];
+  lockTargets.forEach((el) => {
+    if (el) {
+      el.disabled = isLocked;
+    }
+  });
+  if (customChromaButtons) {
+    customChromaButtons.querySelectorAll("button").forEach((btn) => {
+      btn.disabled = isLocked;
+    });
+  }
+  if (isLocked && isCustomSelectionOpen) {
+    closeCustomChromaPicker();
+  }
+  if (seriesActivePill) {
+    seriesActivePill.hidden = !isLocked;
+  }
+}
+
+function updateSeriesControlsState() {
+  const hasSeries = seriesList.length > 0;
+  const hasActiveSeries = Boolean(activeSeries?.id);
+  if (seriesSelect) {
+    seriesSelect.disabled = seriesPlaybackActive || !hasSeries;
+  }
+  if (seriesLoadButton) {
+    seriesLoadButton.disabled = !hasSeries || seriesPlaybackActive;
+  }
+  if (seriesGenerateButton) {
+    seriesGenerateButton.disabled = seriesPlaybackActive;
+  }
+  if (seriesPlayButton) {
+    seriesPlayButton.disabled = !hasActiveSeries || seriesPlaybackActive;
+  }
+  if (seriesStopButton) {
+    seriesStopButton.disabled = !seriesPlaybackActive;
+  }
+  if (seriesExportButton) {
+    seriesExportButton.disabled = !hasActiveSeries;
+  }
+  if (seriesImportButton) {
+    seriesImportButton.disabled = seriesPlaybackActive;
+  }
+}
+
+function setActiveSeries(series) {
+  activeSeries = series ?? null;
+  if (seriesSelect && series?.id) {
+    seriesSelect.value = series.id;
+  }
+  updateSeriesControlsState();
+}
+
+async function handleGenerateSeries() {
+  if (seriesPlaybackActive) return;
+  clearSeriesStatus();
+  const count = Number.parseInt(seriesLengthInput?.value ?? "0", 10);
+  if (!Number.isFinite(count) || count <= 0) {
+    updateSeriesStatus("Enter a valid series length.", { autoHide: true });
+    return;
+  }
+  if (!activeChromaSet?.chromas?.length) {
+    updateSeriesStatus("Select a chroma set before generating.", { autoHide: true });
+    return;
+  }
+  const settingsSnapshot = getSeriesSettingsSnapshot();
+  updateSeriesStatus("Generating series…");
+  const trials = await generateSeriesTrials(count, settingsSnapshot);
+  if (!trials.length) {
+    updateSeriesStatus("No trials generated.", { autoHide: true });
+    return;
+  }
+  const series = {
+    id: generateSeriesId(),
+    createdAt: Date.now(),
+    settingsSnapshot,
+    trials,
+  };
+  await saveSeries(series);
+  await loadSeriesList();
+  setActiveSeries(series);
+  updateSeriesStatus(`Series saved (${trials.length} trials).`, { autoHide: true });
+}
+
+async function handleLoadSeries() {
+  if (!seriesSelect?.value) return;
+  if (seriesPlaybackActive) return;
+  clearSeriesStatus();
+  const series = await getSeriesById(seriesSelect.value);
+  if (!series) {
+    updateSeriesStatus("Series not found.", { autoHide: true });
+    return;
+  }
+  setActiveSeries(series);
+  applySeriesSettingsSnapshot(series.settingsSnapshot);
+  updateSeriesStatus("Series loaded.", { autoHide: true });
+}
+
+function handlePlaySeries() {
+  if (seriesPlaybackActive) return;
+  const selectedId = seriesSelect?.value;
+  if (!activeSeries?.id && selectedId) {
+    const series = seriesList.find((entry) => entry.id === selectedId);
+    if (series) {
+      setActiveSeries(series);
+    }
+  }
+  if (!activeSeries?.id) {
+    updateSeriesStatus("Select a series first.", { autoHide: true });
+    return;
+  }
+  startSeriesPlayback(activeSeries);
+}
+
+function handleStopSeries() {
+  if (!seriesPlaybackActive) return;
+  stopSeriesPlayback({ showStatus: true, message: "Series stopped." });
+}
+
+function downloadSeriesJson(series) {
+  if (!series) return;
+  const blob = new Blob([JSON.stringify(series, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${series.id}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function handleExportSeries() {
+  if (!activeSeries) {
+    updateSeriesStatus("Load a series before exporting.", { autoHide: true });
+    return;
+  }
+  downloadSeriesJson(activeSeries);
+  updateSeriesStatus("Series exported.", { autoHide: true });
+}
+
+async function handleImportSeriesFile(file) {
+  if (!file) return;
+  const text = await file.text();
+  let payload = null;
+  try {
+    payload = JSON.parse(text);
+  } catch (error) {
+    updateSeriesStatus("Invalid JSON file.", { autoHide: true });
+    return;
+  }
+  const incoming = Array.isArray(payload) ? payload : [payload];
+  const saved = [];
+  for (const entry of incoming) {
+    if (!entry?.trials || !Array.isArray(entry.trials) || !entry.trials.length) {
+      continue;
+    }
+    const normalized = {
+      ...entry,
+      id: entry.id && !seriesList.some((series) => series.id === entry.id)
+        ? entry.id
+        : generateSeriesId(),
+      createdAt: Number(entry.createdAt) || Date.now(),
+    };
+    await saveSeries(normalized);
+    saved.push(normalized);
+  }
+  if (!saved.length) {
+    updateSeriesStatus("No valid series found in file.", { autoHide: true });
+    return;
+  }
+  await loadSeriesList();
+  setActiveSeries(saved[saved.length - 1]);
+  updateSeriesStatus(`Imported ${saved.length} series.`, { autoHide: true });
+}
+
+function getSeriesPlaybackLogContext() {
+  if (!seriesPlaybackActive || !activeSeries?.id) {
+    return { seriesPlaybackActive: false };
+  }
+  return {
+    seriesId: activeSeries.id,
+    seriesIndex:
+      Number.isInteger(currentSeriesTrialIndex) ? currentSeriesTrialIndex + 1 : null,
+    seriesPlaybackActive: true,
+  };
 }
 
 function getChromaLabelByIndex(chromaIndex) {
@@ -890,6 +1284,7 @@ function resetTrialState() {
   replayCount = 0;
   currentTrial = null;
   recallPlayPending = false;
+  seriesPendingTrial = null;
   if (feedbackResetTimeout) {
     clearTimeout(feedbackResetTimeout);
     feedbackResetTimeout = null;
@@ -1432,7 +1827,228 @@ function pickRandomNote(chromaIndex, excludedMidiNote) {
   return source[idx];
 }
 
+async function buildRecognizeSeriesTrial(excludedMidiNote) {
+  const trial = await findPlayableTrial(0, excludedMidiNote);
+  if (!trial) return null;
+  return {
+    chromaIndex: trial.chromaIndex,
+    midiNote: trial.midiNote,
+    instrument: trial.instrument,
+  };
+}
+
+async function buildRecallSeriesTrial(
+  excludedMidiNote,
+  lastTargetChroma,
+  lastPlayedChroma,
+  precisionConfig
+) {
+  const excludedRecallNotes = new Set();
+  if (Number.isInteger(lastTargetChroma)) {
+    excludedRecallNotes.add(lastTargetChroma);
+  }
+  if (Number.isInteger(lastPlayedChroma)) {
+    excludedRecallNotes.add(lastPlayedChroma);
+  }
+
+  const targetChromaIndex =
+    pickRecallTargetExcluding(excludedRecallNotes, precisionConfig.semitones) ??
+    pickRandomChromaExcluding(excludedRecallNotes);
+  if (targetChromaIndex == null) return null;
+
+  const options = buildRecallOptionsExcluding(
+    targetChromaIndex,
+    precisionConfig.semitones,
+    excludedRecallNotes
+  );
+
+  const optionPool = options.length
+    ? options
+    : getRecallOptions(targetChromaIndex, precisionConfig.semitones);
+  const chosenChroma =
+    optionPool[Math.floor(Math.random() * optionPool.length)] ?? targetChromaIndex;
+
+  const trial = await findPlayableTrialForChroma(chosenChroma, excludedMidiNote);
+  if (!trial) return null;
+
+  return {
+    chromaIndex: trial.chromaIndex,
+    midiNote: trial.midiNote,
+    instrument: trial.instrument,
+    targetChromaIndex,
+    options,
+  };
+}
+
+async function generateSeriesTrials(count, settingsSnapshot) {
+  const trials = [];
+  let lastMidiNote = null;
+  let lastTargetChroma = null;
+  let lastPlayedChroma = null;
+  const precisionConfig = getRecallPrecisionConfig(settingsSnapshot.precisionValue);
+
+  for (let i = 0; i < count; i += 1) {
+    let trial = null;
+    if (settingsSnapshot.mode === "recall" || settingsSnapshot.mode === "discrimination") {
+      trial = await buildRecallSeriesTrial(
+        lastMidiNote,
+        lastTargetChroma,
+        lastPlayedChroma,
+        precisionConfig
+      );
+      if (trial) {
+        lastTargetChroma = trial.targetChromaIndex;
+        lastPlayedChroma = trial.chromaIndex;
+      }
+    } else {
+      trial = await buildRecognizeSeriesTrial(lastMidiNote);
+    }
+
+    if (!trial) {
+      break;
+    }
+
+    trials.push(trial);
+    lastMidiNote = trial.midiNote;
+  }
+
+  return trials;
+}
+
+async function startSeriesTrial() {
+  if (!activeSeries?.trials?.length) {
+    stopSeriesPlayback({ showStatus: true, message: "No trials in series." });
+    return;
+  }
+  if (seriesPlaybackIndex >= activeSeries.trials.length) {
+    stopSeriesPlayback({ showStatus: true, message: "Series complete." });
+    return;
+  }
+
+  cancelNextTrialTimeout();
+  resetButtonFocus();
+  trialStartTimestampMs = null;
+  replayCount = 0;
+
+  const trialData = activeSeries.trials[seriesPlaybackIndex];
+  const trialIndex = seriesPlaybackIndex;
+  seriesPlaybackIndex += 1;
+  currentSeriesTrialIndex = trialIndex;
+
+  if (!trialData) {
+    stopSeriesPlayback({ showStatus: true, message: "Series trial missing." });
+    return;
+  }
+
+  const audioElement = await prepareAudioElement(trialData.instrument, trialData.midiNote);
+  if (!audioElement) {
+    stopSeriesPlayback({ showStatus: true, message: "Series audio unavailable." });
+    return;
+  }
+
+  const baseTrial = {
+    chromaIndex: trialData.chromaIndex,
+    midiNote: trialData.midiNote,
+    instrument: trialData.instrument,
+    audioElement,
+  };
+
+  if (currentMode === "recall" || currentMode === "discrimination") {
+    const precisionConfig = getRecallPrecisionConfig();
+    recallState = {
+      ...createEmptyRecallState(),
+      targetChromaIndex: trialData.targetChromaIndex,
+      options:
+        Array.isArray(trialData.options) && trialData.options.length
+          ? trialData.options
+          : getRecallOptions(trialData.targetChromaIndex, precisionConfig.semitones),
+      precisionLabel: precisionConfig.label,
+      precisionSemitones: precisionConfig.semitones,
+    };
+
+    currentState = {
+      chromaIndex: null,
+      midiNote: null,
+      instrument: null,
+      chromaSetLabel: activeChromaSet?.label ?? "",
+      exerciseType: getCurrentExerciseType(),
+      answerSet: null,
+      awaitingGuess: false,
+    };
+    currentTrial = null;
+    lastMidiNotePlayed = baseTrial.midiNote;
+    seriesPendingTrial = baseTrial;
+    if (buttonsContainer) {
+      buttonsContainer.innerHTML = "";
+    }
+    scrollButtonsToBottom();
+    updateReplayAvailability();
+    if (currentMode === "recall") {
+      renderRecallMessage();
+    } else if (recallMessage) {
+      recallMessage.hidden = true;
+      recallMessage.textContent = "";
+    }
+    if (currentMode === "discrimination") {
+      handleRecallPlay();
+    }
+    return;
+  }
+
+  const trialChromas = getChromasForTrial(baseTrial.chromaIndex);
+  createButtons(trialChromas);
+  scrollButtonsToBottom();
+  currentState = {
+    chromaIndex: baseTrial.chromaIndex,
+    midiNote: baseTrial.midiNote,
+    instrument: baseTrial.instrument,
+    chromaSetLabel: activeChromaSet?.label ?? "",
+    exerciseType: normalizeExerciseType(activeChromaSet?.exerciseType ?? ""),
+    answerSet: activeAnswerSet,
+    awaitingGuess: true,
+  };
+  currentTrial = baseTrial;
+  lastMidiNotePlayed = baseTrial.midiNote;
+  updateReplayAvailability();
+  playPreparedTrial(baseTrial);
+}
+
+function startSeriesPlayback(series) {
+  if (!series?.trials?.length) {
+    updateSeriesStatus("Series is empty.", { autoHide: true });
+    return;
+  }
+  activeSeries = series;
+  applySeriesSettingsSnapshot(series.settingsSnapshot);
+  seriesPlaybackActive = true;
+  seriesPlaybackIndex = 0;
+  currentSeriesTrialIndex = null;
+  seriesPendingTrial = null;
+  setSettingsLocked(true);
+  clearPendingTrials();
+  updateSeriesControlsState();
+  updateSeriesStatus("Series playback started.", { autoHide: true });
+  startTrial();
+}
+
+function stopSeriesPlayback({ showStatus = false, message } = {}) {
+  seriesPlaybackActive = false;
+  seriesPlaybackIndex = 0;
+  currentSeriesTrialIndex = null;
+  seriesPendingTrial = null;
+  setSettingsLocked(false);
+  cancelNextTrialTimeout();
+  resetTrialState();
+  updateSeriesControlsState();
+  if (showStatus && message) {
+    updateSeriesStatus(message, { autoHide: true });
+  }
+}
+
 async function startTrial(attempt = 0) {
+  if (seriesPlaybackActive) {
+    return startSeriesTrial();
+  }
   if (currentMode === "recall") {
     return startRecallTrial();
   }
@@ -1677,6 +2293,38 @@ async function handleRecallPlay() {
     return;
   }
 
+  if (seriesPlaybackActive && seriesPendingTrial) {
+    const trial = seriesPendingTrial;
+    seriesPendingTrial = null;
+    recallState = {
+      ...recallState,
+      playedChromaIndex: trial.chromaIndex,
+      midiNote: trial.midiNote,
+      instrument: trial.instrument,
+      audioElement: trial.audioElement,
+    };
+
+    currentState = {
+      chromaIndex: trial.chromaIndex,
+      midiNote: trial.midiNote,
+      instrument: trial.instrument,
+      chromaSetLabel: activeChromaSet?.label ?? "",
+      exerciseType: getCurrentExerciseType(),
+      answerSet: null,
+      awaitingGuess: true,
+    };
+    currentTrial = trial;
+    lastMidiNotePlayed = trial.midiNote;
+    createRecallButtons(recallState.options, {
+      targetChromaIndex: recallState.targetChromaIndex,
+      semitones: recallState.precisionSemitones,
+    });
+    scrollButtonsToBottom();
+    updateReplayAvailability();
+    playPreparedTrial(trial);
+    return;
+  }
+
   recallPlayPending = true;
   updateReplayAvailability();
 
@@ -1839,6 +2487,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
   const timestampMS = Date.now();
   const rtMs =
     trialStartTimestampMs == null ? null : Math.max(0, timestampMS - trialStartTimestampMs);
+  const seriesLogContext = getSeriesPlaybackLogContext();
 
   void logTrialResult({
     chromaSetLabel: currentState.chromaSetLabel,
@@ -1858,6 +2507,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     rtMs,
     replayCount,
     isCorrect,
+    ...seriesLogContext,
   });
 
   refreshStatsIfOpen();
@@ -1912,6 +2562,7 @@ function scheduleNextTrial(feedbackDuration) {
   }, delayUntilNextTrial);
   if (
     currentMode === "recognize" &&
+    !seriesPlaybackActive &&
     pendingTrials.length < PREFETCH_TRIAL_COUNT &&
     !pendingPreparationPromise
   ) {
@@ -1926,6 +2577,7 @@ function clearPendingTrials() {
 }
 
 async function preparePendingTrial() {
+  if (seriesPlaybackActive) return null;
   if (currentMode === "recall" || currentMode === "discrimination") return null;
   if (pendingTrials.length >= PREFETCH_TRIAL_COUNT) return pendingTrials[0];
   if (pendingPreparationPromise) return pendingPreparationPromise;
@@ -2379,6 +3031,7 @@ async function init() {
     statsButton.addEventListener("click", toggleStatsPanel);
   }
   setupExportLogsButton();
+  setupSeriesControls();
   if (replayButton) {
     replayButton.addEventListener("click", handleReplayClick);
   }
@@ -2388,6 +3041,7 @@ async function init() {
   }
   startDronePlayersForCurrentSet();
   await hydrateSavedSettings();
+  await loadSeriesList();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
