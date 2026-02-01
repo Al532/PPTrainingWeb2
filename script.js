@@ -101,6 +101,7 @@ const recallMessage = document.getElementById("recall-message");
 const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
 const exportLogsButton = document.getElementById("export-logs-button");
+const exportLogsLastButton = document.getElementById("export-logs-last-button");
 const exportLogsStatus = document.getElementById("export-logs-status");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
 const randomizeButtonsToggle = document.getElementById("randomize-buttons-toggle");
@@ -392,29 +393,57 @@ function updateExportStatus(message, { autoHide = false } = {}) {
   }
 }
 
-function setupExportLogsButton() {
-  if (!exportLogsButton) return;
-  exportLogsButton.addEventListener("click", async () => {
-    if (exportLogsButton.disabled) return;
-    exportLogsButton.disabled = true;
-    updateExportStatus("Exporting… (0 records)");
-
-    try {
-      const total = await exportLogs({
-        dbName: "ppt-training",
-        storeName: "trial-log",
-        onProgress: (count) => {
-          updateExportStatus(`Exporting… (${count} records)`);
-        },
-      });
-      updateExportStatus(`Export complete: ${total} records`, { autoHide: true });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error.";
-      updateExportStatus(`Export failed: ${message}`, { autoHide: true });
-    } finally {
-      exportLogsButton.disabled = false;
+function setExportButtonsDisabled(disabled) {
+  [exportLogsButton, exportLogsLastButton].forEach((button) => {
+    if (button) {
+      button.disabled = disabled;
     }
   });
+}
+
+async function runExportLogs(limit) {
+  const label = limit ? `Exporting last ${limit}…` : "Exporting…";
+  updateExportStatus(`${label} (0 records)`);
+
+  try {
+    const total = await exportLogs({
+      dbName: "ppt-training",
+      storeName: "trial-log",
+      limit,
+      onProgress: (count) => {
+        updateExportStatus(`${label} (${count} records)`);
+      },
+    });
+    updateExportStatus(`Export complete: ${total} records`, { autoHide: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error.";
+    updateExportStatus(`Export failed: ${message}`, { autoHide: true });
+  }
+}
+
+function setupExportLogsButton() {
+  if (exportLogsButton) {
+    exportLogsButton.addEventListener("click", async () => {
+      if (exportLogsButton.disabled) return;
+      setExportButtonsDisabled(true);
+      try {
+        await runExportLogs();
+      } finally {
+        setExportButtonsDisabled(false);
+      }
+    });
+  }
+  if (exportLogsLastButton) {
+    exportLogsLastButton.addEventListener("click", async () => {
+      if (exportLogsLastButton.disabled) return;
+      setExportButtonsDisabled(true);
+      try {
+        await runExportLogs(RECENT_ENTRIES);
+      } finally {
+        setExportButtonsDisabled(false);
+      }
+    });
+  }
 }
 
 function setupSeriesControls() {
