@@ -13,6 +13,7 @@ import {
   refreshStatsIfOpen as refreshStatsIfOpenUtil,
   renderStats as renderStatsUtil,
 } from "./stats.js";
+import { exportLogs } from "./export_logs.js";
 import { getSetting, setSetting } from "./storage/indexedDbStore.js";
 const CORRECT_FEEDBACK_DURATION = 400;
 const INCORRECT_FEEDBACK_DURATION = 1500;
@@ -92,6 +93,8 @@ const precisionRow = document.getElementById("precision-row");
 const recallMessage = document.getElementById("recall-message");
 const statsButton = document.getElementById("stats-button");
 const statsOutput = document.getElementById("stats-output");
+const exportLogsButton = document.getElementById("export-logs-button");
+const exportLogsStatus = document.getElementById("export-logs-status");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
 const randomizeButtonsToggle = document.getElementById("randomize-buttons-toggle");
 const feedbackToggle = document.getElementById("feedback-toggle");
@@ -147,6 +150,7 @@ let currentTrial = null;
 let customButtonHome = customChromaRow;
 let trialLogReady = Promise.resolve();
 let isTrialLogLoaded = false;
+let exportStatusTimeout = null;
 const audioFormats = {
   mp3: { label: "MP3", folder: "MP3", extension: "mp3" },
   wav: { label: "WAV", folder: "WAV", extension: "wav" },
@@ -331,6 +335,45 @@ function setStatsPanelOpen(isOpen) {
 
 function toggleStatsPanel() {
   setStatsPanelOpen(!statsPanelOpen);
+}
+
+function updateExportStatus(message, { autoHide = false } = {}) {
+  if (!exportLogsStatus) return;
+  exportLogsStatus.textContent = message;
+  exportLogsStatus.hidden = false;
+  if (exportStatusTimeout) {
+    clearTimeout(exportStatusTimeout);
+  }
+  if (autoHide) {
+    exportStatusTimeout = setTimeout(() => {
+      exportLogsStatus.hidden = true;
+    }, 4000);
+  }
+}
+
+function setupExportLogsButton() {
+  if (!exportLogsButton) return;
+  exportLogsButton.addEventListener("click", async () => {
+    if (exportLogsButton.disabled) return;
+    exportLogsButton.disabled = true;
+    updateExportStatus("Exporting… (0 records)");
+
+    try {
+      const total = await exportLogs({
+        dbName: "ppt-training",
+        storeName: "trial-log",
+        onProgress: (count) => {
+          updateExportStatus(`Exporting… (${count} records)`);
+        },
+      });
+      updateExportStatus(`Export complete: ${total} records`, { autoHide: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error.";
+      updateExportStatus(`Export failed: ${message}`, { autoHide: true });
+    } finally {
+      exportLogsButton.disabled = false;
+    }
+  });
 }
 
 function getChromaLabelByIndex(chromaIndex) {
@@ -2273,6 +2316,7 @@ async function init() {
   if (statsButton) {
     statsButton.addEventListener("click", toggleStatsPanel);
   }
+  setupExportLogsButton();
   if (replayButton) {
     replayButton.addEventListener("click", handleReplayClick);
   }

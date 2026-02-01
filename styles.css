@@ -192,6 +192,11 @@ main {
   gap: 12px;
 }
 
+.export-row {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .stats-toggle {
   display: inline-flex;
   align-items: center;
@@ -229,6 +234,10 @@ main {
   border-radius: 12px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.02);
+}
+
+.export-status {
+  font-size: 0.95rem;
 }
 
 .stats-output[hidden] {
