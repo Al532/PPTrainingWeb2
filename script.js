@@ -33,6 +33,7 @@ const RANDOMIZE_BUTTON_ORDER_KEY = "ppt-randomize-buttons";
 const DRONE_COUNT_STORAGE_KEY = "ppt-drone-count";
 const LIMITED_FEEDBACK_STORAGE_KEY = "ppt-limited-feedback";
 const FEEDBACK_MODE_STORAGE_KEY = "ppt-feedback-mode";
+const SERIES_RANDOMIZE_START_STORAGE_KEY = "ppt-series-randomize-start";
 const LAST_MODE_STORAGE_KEY = "ppt-last-mode";
 const LAST_RECALL_PRECISION_KEY = "ppt-last-recall-precision";
 const RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL = 5;
@@ -141,6 +142,7 @@ let pendingCustomSelection = new Set(customChromaSelection);
 let audioFormat = DEFAULT_AUDIO_FORMAT;
 let lastClickedChromaIndex = null;
 let feedbackMode = "feedback";
+let preferredFeedbackMode = feedbackMode;
 let currentMode = "recognize";
 let recallPrecisionValue = RECALL_PRECISION_OPTIONS[0]?.value ?? "fourth";
 let selectedDroneCount = 0;
@@ -932,6 +934,7 @@ function setupSeriesRandomizeStartToggle() {
   seriesRandomizeStartToggle.checked = seriesRandomizeStartEnabled;
   seriesRandomizeStartToggle.addEventListener("change", (event) => {
     seriesRandomizeStartEnabled = Boolean(event.target?.checked);
+    saveSeriesRandomizeStartSetting(seriesRandomizeStartEnabled);
   });
 }
 
@@ -944,8 +947,11 @@ function normalizeFeedbackMode(value, fallback = feedbackMode) {
   return fallback;
 }
 
-function setFeedbackMode(mode, { skipSave = false } = {}) {
+function setFeedbackMode(mode, { skipSave = false, skipPreference = false } = {}) {
   feedbackMode = normalizeFeedbackMode(mode);
+  if (!skipPreference) {
+    preferredFeedbackMode = feedbackMode;
+  }
   if (feedbackSelect) {
     feedbackSelect.value = feedbackMode;
   }
@@ -1010,7 +1016,9 @@ function updateModeVisibility() {
   if (chromaSetRow) chromaSetRow.hidden = false;
   if (feedbackRow) feedbackRow.hidden = isRecallLike;
   if (isRecallLike && feedbackMode !== "feedback") {
-    setFeedbackMode("feedback");
+    setFeedbackMode("feedback", { skipSave: true, skipPreference: true });
+  } else if (!isRecallLike && feedbackMode !== preferredFeedbackMode) {
+    setFeedbackMode(preferredFeedbackMode, { skipSave: true, skipPreference: true });
   }
   updateReplayLabel();
 }
@@ -1494,6 +1502,10 @@ function saveRandomizeButtonsSetting(isRandomized) {
   void setSetting(RANDOMIZE_BUTTON_ORDER_KEY, isRandomized ? "true" : "false");
 }
 
+function saveSeriesRandomizeStartSetting(isRandomized) {
+  void setSetting(SERIES_RANDOMIZE_START_STORAGE_KEY, isRandomized ? "true" : "false");
+}
+
 function saveDroneCountSetting(count) {
   void setSetting(DRONE_COUNT_STORAGE_KEY, String(count));
 }
@@ -1622,6 +1634,7 @@ async function hydrateSavedSettings() {
     reducedRangeStored,
     randomizeStored,
     droneCountStored,
+    seriesRandomizeStored,
     feedbackModeStored,
     limitedFeedbackStored,
     modeStored,
@@ -1633,6 +1646,7 @@ async function hydrateSavedSettings() {
     getSetting(REDUCED_RANGE_STORAGE_KEY),
     getSetting(RANDOMIZE_BUTTON_ORDER_KEY),
     getSetting(DRONE_COUNT_STORAGE_KEY),
+    getSetting(SERIES_RANDOMIZE_START_STORAGE_KEY),
     getSetting(FEEDBACK_MODE_STORAGE_KEY),
     getSetting(LIMITED_FEEDBACK_STORAGE_KEY),
     getSetting(LAST_MODE_STORAGE_KEY),
@@ -1671,6 +1685,14 @@ async function hydrateSavedSettings() {
 
   const resolvedDroneCount = parseNumberSetting(droneCountStored, selectedDroneCount);
   setDroneCount(resolvedDroneCount, { skipSave: true });
+
+  seriesRandomizeStartEnabled = parseBooleanSetting(
+    seriesRandomizeStored,
+    seriesRandomizeStartEnabled
+  );
+  if (seriesRandomizeStartToggle) {
+    seriesRandomizeStartToggle.checked = seriesRandomizeStartEnabled;
+  }
 
   const resolvedChromaSet = normalizeStoredChromaSetValue(chromaSetStored);
   setActiveChromaSetByValue(resolvedChromaSet, { skipSave: true });
