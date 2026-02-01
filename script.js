@@ -180,6 +180,7 @@ let seriesPlaybackIndex = 0;
 let currentSeriesTrialIndex = null;
 let settingsLocked = false;
 let seriesPendingTrial = null;
+let seriesPlaybackRunId = "";
 const audioFormats = {
   mp3: { label: "MP3", folder: "MP3", extension: "mp3" },
   wav: { label: "WAV", folder: "WAV", extension: "wav" },
@@ -227,6 +228,23 @@ function getRecallPrecisionConfig(value = recallPrecisionValue) {
     RECALL_PRECISION_OPTIONS.find((option) => option.value === value) ??
     RECALL_PRECISION_OPTIONS[0]
   );
+}
+
+function formatSeriesRunTimestamp(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  const seconds = pad(date.getSeconds());
+  return `${year}${month}${day}-${hours}${minutes}${seconds}`;
+}
+
+function generateSeriesRunId(seriesId) {
+  const timestamp = formatSeriesRunTimestamp(new Date());
+  const randomSuffix = Math.random().toString(36).slice(2, 8);
+  return `${seriesId}__run_${timestamp}__${feedbackMode}__${currentMode}__${randomSuffix}`;
 }
 
 function createEmptyRecallState() {
@@ -809,6 +827,7 @@ function getSeriesPlaybackLogContext() {
   }
   return {
     seriesId: activeSeries.id,
+    seriesRunId: seriesPlaybackRunId,
     seriesIndex:
       Number.isInteger(currentSeriesTrialIndex) ? currentSeriesTrialIndex + 1 : null,
     seriesPlaybackActive: true,
@@ -2049,6 +2068,7 @@ function startSeriesPlayback(series) {
   }
   activeSeries = series;
   applySeriesSettingsSnapshot(series.settingsSnapshot);
+  seriesPlaybackRunId = generateSeriesRunId(series.id);
   seriesPlaybackActive = true;
   seriesPlaybackIndex = 0;
   currentSeriesTrialIndex = null;
@@ -2062,6 +2082,7 @@ function startSeriesPlayback(series) {
 
 function stopSeriesPlayback({ showStatus = false, message } = {}) {
   seriesPlaybackActive = false;
+  seriesPlaybackRunId = "";
   seriesPlaybackIndex = 0;
   currentSeriesTrialIndex = null;
   seriesPendingTrial = null;
