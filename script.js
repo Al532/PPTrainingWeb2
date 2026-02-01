@@ -15,6 +15,7 @@ import {
 } from "./stats.js";
 import { exportLogs } from "./export_logs.js";
 import {
+  deleteSeries,
   getSeriesById,
   getSeriesList,
   getSetting,
@@ -110,9 +111,10 @@ const feedbackSelect = document.getElementById("feedback-select");
 const replayButton = document.getElementById("replay-button");
 const replayRow = document.getElementById("replay-row");
 const seriesLengthInput = document.getElementById("series-length-input");
+const seriesNameInput = document.getElementById("series-name-input");
 const seriesGenerateButton = document.getElementById("series-generate-button");
 const seriesSelect = document.getElementById("series-select");
-const seriesLoadButton = document.getElementById("series-load-button");
+const seriesDeleteButton = document.getElementById("series-delete-button");
 const seriesPlayButton = document.getElementById("series-play-button");
 const seriesStopButton = document.getElementById("series-stop-button");
 const seriesExportButton = document.getElementById("series-export-button");
@@ -477,16 +479,24 @@ function setupSeriesControls() {
       void handleGenerateSeries();
     });
   }
-  if (seriesLoadButton) {
-    seriesLoadButton.addEventListener("click", () => {
-      void handleLoadSeries();
+  if (seriesSelect) {
+    seriesSelect.addEventListener("change", () => {
+      const selected = seriesList.find((entry) => entry.id === seriesSelect.value);
+      setActiveSeries(selected ?? null);
     });
   }
   if (seriesPlayButton) {
-    seriesPlayButton.addEventListener("click", handlePlaySeries);
+    seriesPlayButton.addEventListener("click", () => {
+      void handlePlaySeries();
+    });
   }
   if (seriesStopButton) {
     seriesStopButton.addEventListener("click", handleStopSeries);
+  }
+  if (seriesDeleteButton) {
+    seriesDeleteButton.addEventListener("click", () => {
+      void handleDeleteSeries();
+    });
   }
   if (seriesExportButton) {
     seriesExportButton.addEventListener("click", handleExportSeries);
@@ -531,11 +541,13 @@ function generateSeriesId() {
 
 function formatSeriesLabel(series) {
   if (!series) return "Unknown series";
+  const name = typeof series.name === "string" ? series.name.trim() : "";
   const date = series.createdAt ? new Date(series.createdAt) : null;
   const dateLabel = date ? date.toLocaleString() : "Unknown date";
   const count = Number.isFinite(series.trials?.length) ? series.trials.length : 0;
   const modeLabel = getModeLabel(series.settingsSnapshot?.mode);
-  return `${dateLabel} · ${modeLabel} · ${count} trials`;
+  const details = `${dateLabel} · ${modeLabel} · ${count} trials`;
+  return name ? `${name} · ${details}` : details;
 }
 
 function updateSeriesSelectOptions({ preserveSelection = true } = {}) {
@@ -573,6 +585,12 @@ async function loadSeriesList() {
     seriesList = [];
   }
   updateSeriesSelectOptions({ preserveSelection: false });
+  if (seriesSelect?.value) {
+    const selected = seriesList.find((entry) => entry.id === seriesSelect.value);
+    setActiveSeries(selected ?? null);
+  } else if (!seriesList.length) {
+    setActiveSeries(null);
+  }
   updateSeriesControlsState();
 }
 
@@ -672,23 +690,24 @@ function setSettingsLocked(isLocked) {
 function updateSeriesControlsState() {
   const hasSeries = seriesList.length > 0;
   const hasActiveSeries = Boolean(activeSeries?.id);
+  const selectedSeriesId = seriesSelect?.value;
   if (seriesSelect) {
     seriesSelect.disabled = seriesPlaybackActive || !hasSeries;
-  }
-  if (seriesLoadButton) {
-    seriesLoadButton.disabled = !hasSeries || seriesPlaybackActive;
   }
   if (seriesGenerateButton) {
     seriesGenerateButton.disabled = seriesPlaybackActive;
   }
   if (seriesPlayButton) {
-    seriesPlayButton.disabled = !hasActiveSeries || seriesPlaybackActive;
+    seriesPlayButton.disabled = !hasSeries || !selectedSeriesId || seriesPlaybackActive;
   }
   if (seriesStopButton) {
     seriesStopButton.disabled = !seriesPlaybackActive;
   }
   if (seriesExportButton) {
     seriesExportButton.disabled = !hasActiveSeries;
+  }
+  if (seriesDeleteButton) {
+    seriesDeleteButton.disabled = !hasSeries || !selectedSeriesId || seriesPlaybackActive;
   }
   if (seriesImportButton) {
     seriesImportButton.disabled = seriesPlaybackActive;
@@ -702,6 +721,9 @@ function setActiveSeries(series) {
   activeSeries = series ?? null;
   if (seriesSelect && series?.id) {
     seriesSelect.value = series.id;
+  }
+  if (seriesNameInput) {
+    seriesNameInput.value = series?.name ?? "";
   }
   updateSeriesControlsState();
 }
@@ -725,9 +747,13 @@ async function handleGenerateSeries() {
     updateSeriesStatus("No trials generated.", { autoHide: true });
     return;
   }
+  const name = typeof seriesNameInput?.value === "string"
+    ? seriesNameInput.value.trim()
+    : "";
   const series = {
     id: generateSeriesId(),
     createdAt: Date.now(),
+    name: name || undefined,
     settingsSnapshot,
     trials,
   };
@@ -737,9 +763,12 @@ async function handleGenerateSeries() {
   updateSeriesStatus(`Series saved (${trials.length} trials).`, { autoHide: true });
 }
 
-async function handleLoadSeries() {
-  if (!seriesSelect?.value) return;
+async function handlePlaySeries() {
   if (seriesPlaybackActive) return;
+  if (!seriesSelect?.value) {
+    updateSeriesStatus("Select a series first.", { autoHide: true });
+    return;
+  }
   clearSeriesStatus();
   const series = await getSeriesById(seriesSelect.value);
   if (!series) {
@@ -747,29 +776,34 @@ async function handleLoadSeries() {
     return;
   }
   setActiveSeries(series);
-  applySeriesSettingsSnapshot(series.settingsSnapshot);
-  updateSeriesStatus("Series loaded.", { autoHide: true });
-}
-
-function handlePlaySeries() {
-  if (seriesPlaybackActive) return;
-  const selectedId = seriesSelect?.value;
-  if (!activeSeries?.id && selectedId) {
-    const series = seriesList.find((entry) => entry.id === selectedId);
-    if (series) {
-      setActiveSeries(series);
-    }
-  }
-  if (!activeSeries?.id) {
-    updateSeriesStatus("Select a series first.", { autoHide: true });
-    return;
-  }
   startSeriesPlayback(activeSeries);
 }
 
 function handleStopSeries() {
   if (!seriesPlaybackActive) return;
   stopSeriesPlayback({ showStatus: true, message: "Series stopped." });
+}
+
+async function handleDeleteSeries() {
+  if (seriesPlaybackActive) return;
+  if (!seriesSelect?.value) return;
+  clearSeriesStatus();
+  const seriesId = seriesSelect.value;
+  const series = seriesList.find((entry) => entry.id === seriesId);
+  const label = series ? formatSeriesLabel(series) : "this series";
+  const shouldDelete = window.confirm(`Delete ${label}?`);
+  if (!shouldDelete) return;
+  await deleteSeries(seriesId);
+  if (activeSeries?.id === seriesId) {
+    activeSeries = null;
+  }
+  await loadSeriesList();
+  if (!seriesList.length) {
+    if (seriesNameInput) {
+      seriesNameInput.value = "";
+    }
+  }
+  updateSeriesStatus("Series deleted.", { autoHide: true });
 }
 
 function downloadSeriesJson(series) {
@@ -789,7 +823,7 @@ function downloadSeriesJson(series) {
 
 function handleExportSeries() {
   if (!activeSeries) {
-    updateSeriesStatus("Load a series before exporting.", { autoHide: true });
+    updateSeriesStatus("Select a series before exporting.", { autoHide: true });
     return;
   }
   downloadSeriesJson(activeSeries);
