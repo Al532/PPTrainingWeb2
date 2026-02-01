@@ -73,8 +73,8 @@ export async function persistTrialLog(entries) {
 }
 
 export async function logTrialResult(entry) {
-  const trialDate = formatTrialDate(new Date());
-  const logEntry = { ...entry, trialNumber: nextTrialNumber, trialDate };
+  const timestampMS = Date.now();
+  const logEntry = { ...entry, trialNumber: nextTrialNumber, timestampMS };
   trialLog.push(logEntry);
   nextTrialNumber += 1;
   try {
@@ -142,7 +142,12 @@ export function renderStats({
   const totalTrials = trialLog.length;
   const todayString = formatTrialDate(new Date());
   const totalTrialsToday = trialLog.reduce(
-    (count, entry) => (entry?.trialDate === todayString ? count + 1 : count),
+    (count, entry) => {
+      const entryDay = Number.isFinite(entry?.timestampMS)
+        ? formatTrialDate(new Date(entry.timestampMS))
+        : entry?.trialDate;
+      return entryDay === todayString ? count + 1 : count;
+    },
     0
   );
 
