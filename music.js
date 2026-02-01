@@ -83,13 +83,13 @@ export const instruments = [
 
 export const instrumentRanges = {
   Bassoon: { min: 36, max: 79 },
-  Cellos: { min: 36, max: 80 },
+  Cellos: { min: 37, max: 80 },
   Clarinet: { min: 50, max: 92 },
   Flute: { min: 60, max: 96 },
-  Harp: { min: 36, max: 96 },
+  Harp: { min: 36, max: 94 },
   Horn: { min: 36, max: 79 },
   Oboe: { min: 58, max: 93 },
   Piano: { min: 36, max: 96 },
   Trumpet: { min: 52, max: 91 },
-  Violins: { min: 55, max: 96 },
+  Violins: { min: 56, max: 96 },
 };
