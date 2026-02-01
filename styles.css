@@ -196,9 +196,29 @@ main {
 }
 
 .series {
-  margin-top: 28px;
+  margin-top: 20px;
   border-top: 1px solid var(--border);
   padding-top: 20px;
+}
+
+.series-details {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px 14px;
+}
+
+.series-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.series-summary::-webkit-details-marker {
+  display: none;
 }
 
 .series-header {
@@ -207,12 +227,28 @@ main {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
 }
 
 .series-header h2 {
   margin: 0;
   font-size: 1.3rem;
+}
+
+.series-chevron {
+  display: inline-block;
+  font-size: 1.2rem;
+  line-height: 1;
+  transform: rotate(-90deg);
+  transition: transform 150ms ease;
+  color: var(--muted);
+}
+
+.series-details[open] .series-chevron {
+  transform: rotate(90deg);
+}
+
+.series-body {
+  margin-top: 16px;
 }
 
 .stats-row {
