@@ -63,6 +63,63 @@ export function readAllFromStore(db, storeName, onProgress) {
   });
 }
 
+export function readLastFromStore(db, storeName, limit, onProgress) {
+  return new Promise((resolve, reject) => {
+    const records = [];
+    let count = 0;
+    const safeLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0;
+
+    if (safeLimit === 0) {
+      resolve(records);
+      return;
+    }
+
+    let transaction;
+    let request;
+
+    try {
+      transaction = db.transaction(storeName, "readonly");
+      const store = transaction.objectStore(storeName);
+      request = store.openCursor(null, "prev");
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    transaction.onerror = () => {
+      reject(transaction.error ?? new Error("Failed to read from IndexedDB."));
+    };
+
+    request.onerror = () => {
+      reject(request.error ?? new Error("Failed to read from IndexedDB."));
+    };
+
+    request.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (cursor) {
+        records.push(cursor.value);
+        count += 1;
+        if (onProgress && count % DEFAULT_PROGRESS_INTERVAL === 0) {
+          onProgress(count);
+        }
+        if (count >= safeLimit) {
+          if (onProgress) {
+            onProgress(count);
+          }
+          resolve(records.reverse());
+          return;
+        }
+        cursor.continue();
+      } else {
+        if (onProgress) {
+          onProgress(count);
+        }
+        resolve(records.reverse());
+      }
+    };
+  });
+}
+
 export function downloadJson(filename, data) {
   const json = JSON.stringify(data, null, 2);
   const blob = new Blob([json], { type: "application/json" });
@@ -93,14 +150,21 @@ function buildTimestamp(date = new Date()) {
   return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
 }
 
-export async function exportLogs({ dbName, storeName, onProgress } = {}) {
+export async function exportLogs({ dbName, storeName, onProgress, limit } = {}) {
   const safeDbName = dbName ?? "ppt-training";
   const safeStoreName = storeName ?? "trial-log";
+  const safeLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : null;
   const db = await openDb(safeDbName);
 
   try {
-    const records = await readAllFromStore(db, safeStoreName, onProgress);
-    const filename = `${safeStoreName}_${buildTimestamp()}.json`;
+    const records =
+      safeLimit === null
+        ? await readAllFromStore(db, safeStoreName, onProgress)
+        : await readLastFromStore(db, safeStoreName, safeLimit, onProgress);
+    const filename =
+      safeLimit === null
+        ? `${safeStoreName}_${buildTimestamp()}.json`
+        : `${safeStoreName}_last-${safeLimit}_${buildTimestamp()}.json`;
     downloadJson(filename, records);
     return records.length;
   } finally {
