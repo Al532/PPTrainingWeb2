@@ -26,6 +26,7 @@ const REDUCED_RANGE_STORAGE_KEY = "ppt-reduced-range-enabled";
 const RANDOMIZE_BUTTON_ORDER_KEY = "ppt-randomize-buttons";
 const DRONE_COUNT_STORAGE_KEY = "ppt-drone-count";
 const LIMITED_FEEDBACK_STORAGE_KEY = "ppt-limited-feedback";
+const FEEDBACK_MODE_STORAGE_KEY = "ppt-feedback-mode";
 const LAST_MODE_STORAGE_KEY = "ppt-last-mode";
 const LAST_RECALL_PRECISION_KEY = "ppt-last-recall-precision";
 const RANDOMIZE_BUTTON_ORDER_REROLL_INTERVAL = 5;
@@ -97,7 +98,7 @@ const exportLogsButton = document.getElementById("export-logs-button");
 const exportLogsStatus = document.getElementById("export-logs-status");
 const reducedRangeToggle = document.getElementById("reduced-range-toggle");
 const randomizeButtonsToggle = document.getElementById("randomize-buttons-toggle");
-const feedbackToggle = document.getElementById("feedback-toggle");
+const feedbackSelect = document.getElementById("feedback-select");
 const replayButton = document.getElementById("replay-button");
 const replayRow = document.getElementById("replay-row");
 
@@ -118,7 +119,7 @@ let isCustomSelectionOpen = false;
 let pendingCustomSelection = new Set(customChromaSelection);
 let audioFormat = DEFAULT_AUDIO_FORMAT;
 let lastClickedChromaIndex = null;
-let limitedFeedbackEnabled = false;
+let feedbackMode = "feedback";
 let currentMode = "recognize";
 let recallPrecisionValue = RECALL_PRECISION_OPTIONS[0]?.value ?? "fourth";
 let selectedDroneCount = 0;
@@ -139,6 +140,8 @@ let currentAudio = null;
 let currentAudioGainNode = null;
 let nextTrialTimeout = null;
 let lastMidiNotePlayed = null;
+let trialStartTimestampMs = null;
+let replayCount = 0;
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 let audioContext = null;
 let pendingTrials = [];
@@ -155,6 +158,12 @@ const audioFormats = {
   mp3: { label: "MP3", folder: "MP3", extension: "mp3" },
   wav: { label: "WAV", folder: "WAV", extension: "wav" },
 };
+
+const FEEDBACK_MODE_OPTIONS = [
+  { value: "feedback", label: "Feedback" },
+  { value: "limited", label: "Limited feedback" },
+  { value: "none", label: "No feedback" },
+];
 
 function normalizeExerciseType(type = "") {
   const trimmed = type.trim();
@@ -178,6 +187,13 @@ function getCurrentExerciseType() {
 
 function getModeLabel(mode = currentMode) {
   return MODES.find((option) => option.value === mode)?.label ?? "Recognize";
+}
+
+function getFeedbackModeLabel(mode = feedbackMode) {
+  return (
+    FEEDBACK_MODE_OPTIONS.find((option) => option.value === mode)?.label ??
+    FEEDBACK_MODE_OPTIONS[0].label
+  );
 }
 
 function getRecallPrecisionConfig(value = recallPrecisionValue) {
@@ -461,24 +477,45 @@ function setupRandomizeButtonsToggle() {
   });
 }
 
-function setLimitedFeedbackEnabled(isEnabled, { skipSave = false } = {}) {
-  limitedFeedbackEnabled = Boolean(isEnabled);
-  if (feedbackToggle) {
-    feedbackToggle.checked = limitedFeedbackEnabled;
+function normalizeFeedbackMode(value, fallback = feedbackMode) {
+  if (value === "feedback" || value === "limited" || value === "none") {
+    return value;
+  }
+  if (value === true || value === "true") return "limited";
+  if (value === false || value === "false") return "feedback";
+  return fallback;
+}
+
+function setFeedbackMode(mode, { skipSave = false } = {}) {
+  feedbackMode = normalizeFeedbackMode(mode);
+  if (feedbackSelect) {
+    feedbackSelect.value = feedbackMode;
   }
   if (!skipSave) {
-    saveLimitedFeedbackSetting(limitedFeedbackEnabled);
+    saveFeedbackModeSetting(feedbackMode);
   }
-  if (limitedFeedbackEnabled) {
+  if (feedbackMode !== "feedback") {
     resetButtonStates();
   }
 }
 
-function setupFeedbackToggle() {
-  if (!feedbackToggle) return;
-  feedbackToggle.checked = limitedFeedbackEnabled;
-  feedbackToggle.addEventListener("change", (event) => {
-    setLimitedFeedbackEnabled(event.target?.checked);
+function renderFeedbackOptions(selectedValue = feedbackMode) {
+  if (!feedbackSelect) return;
+  feedbackSelect.innerHTML = "";
+  FEEDBACK_MODE_OPTIONS.forEach((optionConfig) => {
+    const option = document.createElement("option");
+    option.value = optionConfig.value;
+    option.textContent = optionConfig.label;
+    feedbackSelect.appendChild(option);
+  });
+  feedbackSelect.value = selectedValue;
+}
+
+function setupFeedbackSelect() {
+  if (!feedbackSelect) return;
+  renderFeedbackOptions(feedbackMode);
+  feedbackSelect.addEventListener("change", (event) => {
+    setFeedbackMode(event.target?.value);
   });
 }
 
@@ -514,8 +551,8 @@ function updateModeVisibility() {
   if (precisionRow) precisionRow.hidden = !isRecallLike;
   if (chromaSetRow) chromaSetRow.hidden = false;
   if (feedbackRow) feedbackRow.hidden = isRecallLike;
-  if (isRecallLike && limitedFeedbackEnabled) {
-    setLimitedFeedbackEnabled(false);
+  if (isRecallLike && feedbackMode !== "feedback") {
+    setFeedbackMode("feedback");
   }
   updateReplayLabel();
 }
@@ -849,6 +886,8 @@ function resetTrialState() {
   cancelNextTrialTimeout();
   cancelScheduledFade();
   fadeOutCurrentAudio();
+  trialStartTimestampMs = null;
+  replayCount = 0;
   currentTrial = null;
   recallPlayPending = false;
   if (feedbackResetTimeout) {
@@ -957,6 +996,10 @@ function parseBooleanSetting(value, fallback = false) {
   return fallback;
 }
 
+function parseFeedbackModeSetting(value, fallback = feedbackMode) {
+  return normalizeFeedbackMode(value, fallback);
+}
+
 function parseNumberSetting(value, fallback = 0) {
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) ? parsed : fallback;
@@ -996,16 +1039,16 @@ function saveDroneCountSetting(count) {
   void setSetting(DRONE_COUNT_STORAGE_KEY, String(count));
 }
 
-function saveLimitedFeedbackSetting(isLimited) {
-  void setSetting(LIMITED_FEEDBACK_STORAGE_KEY, isLimited ? "true" : "false");
-}
-
 function saveModeSelection(value) {
   void setSetting(LAST_MODE_STORAGE_KEY, String(value));
 }
 
 function saveRecallPrecisionSelection(value) {
   void setSetting(LAST_RECALL_PRECISION_KEY, String(value));
+}
+
+function saveFeedbackModeSetting(value) {
+  void setSetting(FEEDBACK_MODE_STORAGE_KEY, value);
 }
 
 function getChromaSetOptions() {
@@ -1120,6 +1163,7 @@ async function hydrateSavedSettings() {
     reducedRangeStored,
     randomizeStored,
     droneCountStored,
+    feedbackModeStored,
     limitedFeedbackStored,
     modeStored,
     precisionStored,
@@ -1130,6 +1174,7 @@ async function hydrateSavedSettings() {
     getSetting(REDUCED_RANGE_STORAGE_KEY),
     getSetting(RANDOMIZE_BUTTON_ORDER_KEY),
     getSetting(DRONE_COUNT_STORAGE_KEY),
+    getSetting(FEEDBACK_MODE_STORAGE_KEY),
     getSetting(LIMITED_FEEDBACK_STORAGE_KEY),
     getSetting(LAST_MODE_STORAGE_KEY),
     getSetting(LAST_RECALL_PRECISION_KEY),
@@ -1140,11 +1185,9 @@ async function hydrateSavedSettings() {
   const parsedSelection = parseCustomChromaSelection(customSelectionStored);
   updateCustomChromaSet(parsedSelection, { shouldSelectCustom: false, skipSave: true });
 
-  const resolvedLimitedFeedback = parseBooleanSetting(
-    limitedFeedbackStored,
-    limitedFeedbackEnabled
-  );
-  setLimitedFeedbackEnabled(resolvedLimitedFeedback, { skipSave: true });
+  const resolvedFeedbackMode =
+    feedbackModeStored ?? limitedFeedbackStored ?? feedbackMode;
+  setFeedbackMode(parseFeedbackModeSetting(resolvedFeedbackMode), { skipSave: true });
 
   const resolvedMode =
     typeof modeStored === "string" ? modeStored : currentMode;
@@ -1402,6 +1445,8 @@ async function startTrial(attempt = 0) {
 async function startRecognizeTrial(attempt = 0) {
   cancelNextTrialTimeout();
   resetButtonFocus();
+  trialStartTimestampMs = null;
+  replayCount = 0;
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
@@ -1456,6 +1501,8 @@ async function startRecallTrial() {
   cancelNextTrialTimeout();
   resetButtonFocus();
   clearPendingTrials();
+  trialStartTimestampMs = null;
+  replayCount = 0;
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
@@ -1507,6 +1554,8 @@ async function startDiscriminationTrial() {
   cancelNextTrialTimeout();
   resetButtonFocus();
   clearPendingTrials();
+  trialStartTimestampMs = null;
+  replayCount = 0;
 
   if (!activeChromaSet || !activeChromaSet.chromas.length) {
     currentState.awaitingGuess = false;
@@ -1594,6 +1643,9 @@ function playPreparedTrial(trial) {
   if (!audio) return;
 
   stopCurrentAudio();
+  if (trialStartTimestampMs == null) {
+    trialStartTimestampMs = Date.now();
+  }
 
   const context = getAudioContext();
   if (context) {
@@ -1678,6 +1730,10 @@ function replayCurrentTrial() {
 }
 
 function handleReplayClick() {
+  if (replayButton?.disabled) return;
+  if (currentState.awaitingGuess || recallState?.targetChromaIndex != null) {
+    replayCount += 1;
+  }
   if (currentMode === "recall" || currentMode === "discrimination") {
     handleRecallPlay();
     return;
@@ -1780,6 +1836,9 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     recallState?.targetChromaIndex != null
       ? getChromaLabelByIndex(recallState.targetChromaIndex)
       : "";
+  const timestampMS = Date.now();
+  const rtMs =
+    trialStartTimestampMs == null ? null : Math.max(0, timestampMS - trialStartTimestampMs);
 
   void logTrialResult({
     chromaSetLabel: currentState.chromaSetLabel,
@@ -1791,16 +1850,19 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     answerSet: resolvedAnswerSet,
     reducedRangeEnabled,
     dronesPlayed: getActiveDroneLabels(),
-    "Limited feedback": limitedFeedbackEnabled,
+    "Feedback mode": getFeedbackModeLabel(),
     Mode: getModeLabel(),
     "Recall precision": recallState?.precisionLabel || "",
     "Recall note": recallTargetLabel,
+    timestampMS,
+    rtMs,
+    replayCount,
     isCorrect,
   });
 
   refreshStatsIfOpen();
 
-  if (!limitedFeedbackEnabled) {
+  if (feedbackMode === "feedback") {
     if (isCorrect) {
       chosenButton?.classList.add("correct");
     } else {
@@ -1813,7 +1875,7 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     ? CORRECT_FEEDBACK_DURATION
     : INCORRECT_FEEDBACK_DURATION;
 
-  if (shouldFadeOut) {
+  if (shouldFadeOut && feedbackMode !== "none") {
     scheduleAudioFade(feedbackDuration);
   }
 
@@ -1821,17 +1883,17 @@ function handleAnswer(chosenChroma, { shouldFadeOut = true } = {}) {
     preparePendingTrial();
   }
 
-  if (!limitedFeedbackEnabled) {
+  if (feedbackMode === "feedback") {
     scheduleFeedbackReset(feedbackDuration);
     scheduleNextTrial(feedbackDuration);
     return;
   }
 
-  if (!isCorrect) {
+  if (feedbackMode === "limited" && !isCorrect) {
     playLimitedFeedbackSound();
   }
 
-  scheduleNextTrial(feedbackDuration);
+  scheduleNextTrial(feedbackMode === "none" ? 0 : feedbackDuration);
 }
 
 function cancelNextTrialTimeout() {
@@ -2305,8 +2367,8 @@ async function init() {
   populateAnswerSetSelect();
   setupReducedRangeToggle();
   setupRandomizeButtonsToggle();
-  setupFeedbackToggle();
-  setLimitedFeedbackEnabled(limitedFeedbackEnabled);
+  setupFeedbackSelect();
+  setFeedbackMode(feedbackMode);
   setupDroneCountSelect();
   setupDroneResetButton();
   setupCustomChromaButton();
