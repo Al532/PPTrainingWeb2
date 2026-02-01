@@ -119,6 +119,9 @@ const seriesImportButton = document.getElementById("series-import-button");
 const seriesImportInput = document.getElementById("series-import-input");
 const seriesStatus = document.getElementById("series-status");
 const seriesActivePill = document.getElementById("series-active-pill");
+const seriesRandomizeStartToggle = document.getElementById(
+  "series-randomize-start-toggle",
+);
 
 let reducedRangeEnabled = false;
 let midiRange = getRangeForSetting(reducedRangeEnabled);
@@ -177,7 +180,9 @@ let seriesList = [];
 let activeSeries = null;
 let seriesPlaybackActive = false;
 let seriesPlaybackIndex = 0;
+let seriesPlaybackCount = 0;
 let currentSeriesTrialIndex = null;
+let seriesRandomizeStartEnabled = false;
 let settingsLocked = false;
 let seriesPendingTrial = null;
 let seriesPlaybackRunId = "";
@@ -686,6 +691,9 @@ function updateSeriesControlsState() {
   if (seriesImportButton) {
     seriesImportButton.disabled = seriesPlaybackActive;
   }
+  if (seriesRandomizeStartToggle) {
+    seriesRandomizeStartToggle.disabled = seriesPlaybackActive;
+  }
 }
 
 function setActiveSeries(series) {
@@ -916,6 +924,14 @@ function setupRandomizeButtonsToggle() {
     saveRandomizeButtonsSetting(randomizeButtonsEnabled);
     resetRandomizedButtonOrder();
     refreshButtonOrder();
+  });
+}
+
+function setupSeriesRandomizeStartToggle() {
+  if (!seriesRandomizeStartToggle) return;
+  seriesRandomizeStartToggle.checked = seriesRandomizeStartEnabled;
+  seriesRandomizeStartToggle.addEventListener("change", (event) => {
+    seriesRandomizeStartEnabled = Boolean(event.target?.checked);
   });
 }
 
@@ -1968,7 +1984,7 @@ async function startSeriesTrial() {
     stopSeriesPlayback({ showStatus: true, message: "No trials in series." });
     return;
   }
-  if (seriesPlaybackIndex >= activeSeries.trials.length) {
+  if (seriesPlaybackCount >= activeSeries.trials.length) {
     stopSeriesPlayback({ showStatus: true, message: "Series complete." });
     return;
   }
@@ -1978,9 +1994,11 @@ async function startSeriesTrial() {
   trialStartTimestampMs = null;
   replayCount = 0;
 
+  const totalTrials = activeSeries.trials.length;
   const trialData = activeSeries.trials[seriesPlaybackIndex];
   const trialIndex = seriesPlaybackIndex;
-  seriesPlaybackIndex += 1;
+  seriesPlaybackIndex = (seriesPlaybackIndex + 1) % totalTrials;
+  seriesPlaybackCount += 1;
   currentSeriesTrialIndex = trialIndex;
 
   if (!trialData) {
@@ -2070,7 +2088,10 @@ function startSeriesPlayback(series) {
   applySeriesSettingsSnapshot(series.settingsSnapshot);
   seriesPlaybackRunId = generateSeriesRunId(series.id);
   seriesPlaybackActive = true;
-  seriesPlaybackIndex = 0;
+  seriesPlaybackIndex = seriesRandomizeStartEnabled
+    ? Math.floor(Math.random() * series.trials.length)
+    : 0;
+  seriesPlaybackCount = 0;
   currentSeriesTrialIndex = null;
   seriesPendingTrial = null;
   setSettingsLocked(true);
@@ -2084,6 +2105,7 @@ function stopSeriesPlayback({ showStatus = false, message } = {}) {
   seriesPlaybackActive = false;
   seriesPlaybackRunId = "";
   seriesPlaybackIndex = 0;
+  seriesPlaybackCount = 0;
   currentSeriesTrialIndex = null;
   seriesPendingTrial = null;
   setSettingsLocked(false);
@@ -3069,6 +3091,7 @@ async function init() {
   populateAnswerSetSelect();
   setupReducedRangeToggle();
   setupRandomizeButtonsToggle();
+  setupSeriesRandomizeStartToggle();
   setupFeedbackSelect();
   setFeedbackMode(feedbackMode);
   setupDroneCountSelect();
