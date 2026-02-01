@@ -1,12 +1,14 @@
 const DB_NAME = "ppt-training";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const SETTINGS_STORE = "settings";
 const TRIAL_LOG_STORE = "trial-log";
+const SERIES_STORE = "series";
 
 let dbPromise = null;
 let useMemoryFallback = false;
 const memorySettings = new Map();
 let memoryTrialLog = [];
+const memorySeries = new Map();
 
 function requestToPromise(request) {
   return new Promise((resolve, reject) => {
@@ -41,6 +43,10 @@ function openDb() {
         const store = db.createObjectStore(TRIAL_LOG_STORE, { autoIncrement: true });
         store.createIndex("trialNumber", "trialNumber", { unique: false });
         store.createIndex("trialDate", "trialDate", { unique: false });
+      }
+      if (!db.objectStoreNames.contains(SERIES_STORE)) {
+        const store = db.createObjectStore(SERIES_STORE, { keyPath: "id" });
+        store.createIndex("createdAt", "createdAt", { unique: false });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -134,6 +140,79 @@ export async function replaceTrialLog(entries = []) {
     memoryTrialLog.forEach((entry) => {
       store.add(entry);
     });
+    await transactionToPromise(transaction);
+  });
+}
+
+export async function getSeriesList() {
+  if (useMemoryFallback) return Array.from(memorySeries.values());
+
+  const result = await withDb(async (db) => {
+    const transaction = db.transaction(SERIES_STORE, "readonly");
+    const store = transaction.objectStore(SERIES_STORE);
+    const entries = await requestToPromise(store.getAll());
+    await transactionToPromise(transaction);
+    return entries ?? [];
+  });
+
+  if (Array.isArray(result)) {
+    memorySeries.clear();
+    result.forEach((entry) => {
+      if (entry?.id) {
+        memorySeries.set(entry.id, entry);
+      }
+    });
+    return result;
+  }
+
+  return Array.from(memorySeries.values());
+}
+
+export async function getSeriesById(id) {
+  if (!id) return null;
+  if (useMemoryFallback) {
+    return memorySeries.get(id) ?? null;
+  }
+
+  const result = await withDb(async (db) => {
+    const transaction = db.transaction(SERIES_STORE, "readonly");
+    const store = transaction.objectStore(SERIES_STORE);
+    const entry = await requestToPromise(store.get(id));
+    await transactionToPromise(transaction);
+    return entry ?? null;
+  });
+
+  if (result && result.id) {
+    memorySeries.set(result.id, result);
+    return result;
+  }
+
+  return memorySeries.get(id) ?? null;
+}
+
+export async function saveSeries(series) {
+  if (!series?.id) return null;
+  memorySeries.set(series.id, series);
+  if (useMemoryFallback) return series;
+
+  await withDb(async (db) => {
+    const transaction = db.transaction(SERIES_STORE, "readwrite");
+    const store = transaction.objectStore(SERIES_STORE);
+    store.put(series);
+    await transactionToPromise(transaction);
+  });
+  return series;
+}
+
+export async function deleteSeries(id) {
+  if (!id) return;
+  memorySeries.delete(id);
+  if (useMemoryFallback) return;
+
+  await withDb(async (db) => {
+    const transaction = db.transaction(SERIES_STORE, "readwrite");
+    const store = transaction.objectStore(SERIES_STORE);
+    store.delete(id);
     await transactionToPromise(transaction);
   });
 }

@@ -103,6 +103,15 @@ main {
   font-size: 1rem;
 }
 
+.controls-row input {
+  background: #1f2937;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 1rem;
+}
+
 .secondary-button {
   padding: 10px 12px;
   border-radius: 10px;
@@ -184,6 +193,26 @@ main {
 
 .stats {
   margin-top: 28px;
+}
+
+.series {
+  margin-top: 28px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+
+.series-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.series-header h2 {
+  margin: 0;
+  font-size: 1.3rem;
 }
 
 .stats-row {
