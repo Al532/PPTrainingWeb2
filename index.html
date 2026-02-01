@@ -31,6 +31,60 @@
       </div>
     </section>
 
+    <section class="series" aria-label="Series playback">
+      <details class="series-details" open>
+        <summary class="series-summary">
+          <div class="series-header">
+            <h2>Series</h2>
+            <div id="series-active-pill" class="pill muted" hidden>
+              Series active — settings locked
+            </div>
+          </div>
+          <span class="series-chevron" aria-hidden="true">‹</span>
+        </summary>
+        <div class="series-body">
+          <div class="controls-row">
+            <label for="series-length-input">Series length</label>
+            <input
+              type="number"
+              id="series-length-input"
+              min="1"
+              max="500"
+              value="20"
+            >
+            <button type="button" id="series-generate-button" class="secondary-button">
+              Generate series
+            </button>
+          </div>
+          <div class="controls-row">
+            <label for="series-select">Select series</label>
+            <select id="series-select"></select>
+            <button type="button" id="series-load-button" class="secondary-button">
+              Load series
+            </button>
+          </div>
+          <div class="controls-row">
+            <button type="button" id="series-play-button" class="secondary-button">
+              Play series
+            </button>
+            <button type="button" id="series-stop-button" class="secondary-button" disabled>
+              Stop series
+            </button>
+          </div>
+          <div class="controls-row">
+            <button type="button" id="series-export-button" class="secondary-button" disabled>
+              Export series
+            </button>
+            <button type="button" id="series-import-button" class="secondary-button">
+              Import series
+            </button>
+            <input type="file" id="series-import-input" accept="application/json" hidden>
+          </div>
+          <div id="series-status" class="export-status muted" aria-live="polite" hidden></div>
+        </div>
+      </details>
+    </section>
+
     <section class="controls" aria-label="Chromas">
       <div class="controls-row">
         <label for="mode-select">Mode</label>
@@ -85,53 +139,6 @@
         <div id="custom-chroma-buttons" class="buttons custom-chroma-buttons"></div>
       </div>
       <div id="chroma-buttons" class="buttons"></div>
-    </section>
-
-    <section class="series" aria-label="Series playback">
-      <div class="series-header">
-        <h2>Series</h2>
-        <div id="series-active-pill" class="pill muted" hidden>
-          Series active — settings locked
-        </div>
-      </div>
-      <div class="controls-row">
-        <label for="series-length-input">Series length</label>
-        <input
-          type="number"
-          id="series-length-input"
-          min="1"
-          max="500"
-          value="20"
-        >
-        <button type="button" id="series-generate-button" class="secondary-button">
-          Generate series
-        </button>
-      </div>
-      <div class="controls-row">
-        <label for="series-select">Select series</label>
-        <select id="series-select"></select>
-        <button type="button" id="series-load-button" class="secondary-button">
-          Load series
-        </button>
-      </div>
-      <div class="controls-row">
-        <button type="button" id="series-play-button" class="secondary-button">
-          Play series
-        </button>
-        <button type="button" id="series-stop-button" class="secondary-button" disabled>
-          Stop series
-        </button>
-      </div>
-      <div class="controls-row">
-        <button type="button" id="series-export-button" class="secondary-button" disabled>
-          Export series
-        </button>
-        <button type="button" id="series-import-button" class="secondary-button">
-          Import series
-        </button>
-        <input type="file" id="series-import-input" accept="application/json" hidden>
-      </div>
-      <div id="series-status" class="export-status muted" aria-live="polite" hidden></div>
     </section>
 
     <section class="stats" aria-label="Session stats">
