@@ -103,6 +103,26 @@ main {
   font-size: 1rem;
 }
 
+.precision-row {
+  align-items: flex-start;
+}
+
+.half-slider-group {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  flex-wrap: nowrap;
+}
+
+.half-slider {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+input.half-slider[type="range"] {
+  accent-color: var(--accent);
+}
+
 .secondary-button {
   padding: 10px 12px;
   border-radius: 10px;
@@ -329,3 +349,14 @@ button.chroma.incorrect {
     font-size: 1rem;
   }
 }
+
+@media (orientation: portrait) {
+  .half-slider-group {
+    width: 100%;
+  }
+
+  .half-slider {
+    width: calc(50% - 6px);
+  }
+}
+

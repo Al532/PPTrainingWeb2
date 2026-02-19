@@ -40,6 +40,7 @@ const RECENT_ENTRIES = 1000;
 const PREFETCH_TRIAL_COUNT = 10;
 // Toggle between "mp3" or "wav" to switch the asset set without exposing UI controls.
 const DEFAULT_AUDIO_FORMAT = "mp3";
+const APP_VERSION = "1.0.1";
 
 const ANSWER_SET_TYPES = [
   "Auto",
@@ -75,6 +76,8 @@ const buttonsContainer = document.getElementById("chroma-buttons");
 const midiStatusEl = document.getElementById("midi-status");
 const modeSelect = document.getElementById("mode-select");
 const precisionSelect = document.getElementById("precision-select");
+const levelSelect = document.getElementById("level-select");
+const levelSlider = document.getElementById("level-slider");
 const chromaSetSelect = document.getElementById("chroma-set-select");
 const answerSetSelect = document.getElementById("answer-set-select");
 const droneCountSelect = document.getElementById("drone-count-select");
@@ -181,6 +184,33 @@ function getRecallPrecisionConfig(value = recallPrecisionValue) {
     RECALL_PRECISION_OPTIONS.find((option) => option.value === value) ??
     RECALL_PRECISION_OPTIONS[0]
   );
+}
+
+function getRecallPrecisionLevel(value = recallPrecisionValue) {
+  const resolvedValue =
+    RECALL_PRECISION_OPTIONS.find((option) => option.value === value)?.value ??
+    RECALL_PRECISION_OPTIONS[0]?.value;
+  const index = RECALL_PRECISION_OPTIONS.findIndex(
+    (option) => option.value === resolvedValue
+  );
+  return Math.max(1, index + 1);
+}
+
+function getRecallPrecisionValueFromLevel(levelValue) {
+  const parsedLevel = Number.parseInt(levelValue, 10);
+  if (!Number.isInteger(parsedLevel)) return null;
+  const clamped = Math.max(1, Math.min(parsedLevel, RECALL_PRECISION_OPTIONS.length));
+  return RECALL_PRECISION_OPTIONS[clamped - 1]?.value ?? null;
+}
+
+function syncLevelControls() {
+  const level = String(getRecallPrecisionLevel());
+  if (levelSelect) {
+    levelSelect.value = level;
+  }
+  if (levelSlider) {
+    levelSlider.value = level;
+  }
 }
 
 function createEmptyRecallState() {
@@ -496,15 +526,18 @@ function setMode(modeValue, { skipSave = false } = {}) {
 }
 
 function setRecallPrecision(value, { skipSave = false } = {}) {
+  const valueFromLevel = getRecallPrecisionValueFromLevel(value);
+  const candidateValue = valueFromLevel ?? value;
   const resolvedValue = RECALL_PRECISION_OPTIONS.some(
-    (option) => option.value === value
+    (option) => option.value === candidateValue
   )
-    ? value
+    ? candidateValue
     : RECALL_PRECISION_OPTIONS[0]?.value ?? "fourth";
   recallPrecisionValue = resolvedValue;
   if (precisionSelect) {
     precisionSelect.value = resolvedValue;
   }
+  syncLevelControls();
   if (!skipSave) {
     saveRecallPrecisionSelection(resolvedValue);
   }
@@ -527,6 +560,42 @@ function setupPrecisionSelect() {
   precisionSelect.addEventListener("change", (event) => {
     setRecallPrecision(event.target.value);
   });
+}
+
+function setupLevelControls() {
+  const applyLevel = (value) => {
+    const precisionValue = getRecallPrecisionValueFromLevel(value);
+    if (precisionValue) {
+      setRecallPrecision(precisionValue);
+    }
+  };
+
+  if (levelSelect) {
+    levelSelect.innerHTML = "";
+    RECALL_PRECISION_OPTIONS.forEach((optionConfig, index) => {
+      const option = document.createElement("option");
+      option.value = String(index + 1);
+      option.textContent = `Level ${index + 1}`;
+      levelSelect.appendChild(option);
+    });
+    levelSelect.addEventListener("change", (event) => {
+      applyLevel(event.target.value);
+    });
+  }
+
+  if (levelSlider) {
+    levelSlider.min = "1";
+    levelSlider.max = String(RECALL_PRECISION_OPTIONS.length);
+    levelSlider.step = "1";
+    levelSlider.addEventListener("input", (event) => {
+      applyLevel(event.target.value);
+    });
+    levelSlider.addEventListener("change", (event) => {
+      applyLevel(event.target.value);
+    });
+  }
+
+  syncLevelControls();
 }
 
 function setupDroneCountSelect() {
@@ -1301,11 +1370,13 @@ async function checkSampleExists(instrument, midiNote) {
   }
 
   const src = getAudioSrc(instrument, midiNote);
+  const isHeadRejected = (status) => status === 405 || status === 501 || status === 403;
 
   try {
-    const response = await fetch(src, {
-      method: "HEAD",
-    });
+    let response = await fetch(src, { method: "HEAD" });
+    if (!response.ok && isHeadRejected(response.status)) {
+      response = await fetch(src, { method: "GET" });
+    }
     const ok = response.ok;
     availabilityCache.set(key, ok);
     return ok;
@@ -2248,6 +2319,7 @@ function getDroneGainForCount(count) {
 }
 
 async function init() {
+  document.documentElement.dataset.appVersion = APP_VERSION;
   trialLogReady = loadTrialLog()
     .then(() => {
       isTrialLogLoaded = true;
@@ -2258,6 +2330,7 @@ async function init() {
   await trialLogReady;
   setupModeSelect();
   setupPrecisionSelect();
+  setupLevelControls();
   populateChromaSetSelect();
   populateAnswerSetSelect();
   setupReducedRangeToggle();
